@@ -1546,7 +1546,8 @@ def _spatial_load_params(path="config/matching_params.json"):
         return json.load(handle)
 
 
-def _spatial_gray(frame):
+def _spatial_gray(frame, params=None):
+    params = params or _spatial_load_params()
     image = frame.get("clahe_gray")
     if image is None:
         image = frame.get("enhanced_gray")
@@ -1562,7 +1563,7 @@ def _spatial_gray(frame):
     image = np.asarray(image)
     if image.ndim == 3:
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    size = int(_spatial_load_params().get("canonical_size", 448))
+    size = int(params.get("canonical_size", 448))
     if image.shape[:2] != (size, size):
         image = cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
     return image.astype(np.uint8)
@@ -1758,7 +1759,7 @@ def _spatial_method_b(gray_a, gray_b, points_a, points_b, params):
 
 def match_frame_pair(frame_a, frame_b, params_path="config/matching_params.json") -> Dict[str, Any]:
     params = _spatial_load_params(params_path)
-    gray_a, gray_b = _spatial_gray(frame_a), _spatial_gray(frame_b)
+    gray_a, gray_b = _spatial_gray(frame_a, params), _spatial_gray(frame_b, params)
     mask_a, mask_b = _spatial_mask(frame_a, gray_a.shape, params), _spatial_mask(frame_b, gray_b.shape, params)
     skel_a, skel_b = _spatial_skeleton(frame_a, mask_a), _spatial_skeleton(frame_b, mask_b)
     mins_a = _spatial_minutiae(frame_a, skel_a, params)
