@@ -1104,6 +1104,24 @@ async def get_spatial_match_config_endpoint():
     }
 
 
+class VideoMatchRequest(BaseModel):
+    video_a_path: Optional[str] = None
+    video_b_path: Optional[str] = None
+    filter_method: Optional[str] = "frangi"
+    threshold_method: Optional[str] = "adaptive"
+    adaptive_block_size: Optional[int] = 15
+    adaptive_c: Optional[int] = 2
+    exclude_nostrils: Optional[bool] = True
+    min_spur_length: Optional[int] = 8
+    min_component_size: Optional[int] = 30
+    frames_a: Optional[List[Any]] = None
+    frames_b: Optional[List[Any]] = None
+    cache_id_a: Optional[str] = None
+    cache_id_b: Optional[str] = None
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
+
+
 @app.post("/api/video/match")
 async def match_video_endpoint(req: VideoMatchRequest):
     """Match two video identifiers through a bounded cache and the spatial matcher."""
@@ -1157,24 +1175,6 @@ async def match_video_endpoint(req: VideoMatchRequest):
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Spatial video matching failed: {exc}")
-
-
-class VideoMatchRequest(BaseModel):
-    video_a_path: Optional[str] = None
-    video_b_path: Optional[str] = None
-    filter_method: Optional[str] = "frangi"
-    threshold_method: Optional[str] = "adaptive"
-    adaptive_block_size: Optional[int] = 15
-    adaptive_c: Optional[int] = 2
-    exclude_nostrils: Optional[bool] = True
-    min_spur_length: Optional[int] = 8
-    min_component_size: Optional[int] = 30
-    frames_a: Optional[List[Any]] = None
-    frames_b: Optional[List[Any]] = None
-    cache_id_a: Optional[str] = None
-    cache_id_b: Optional[str] = None
-    device: Optional[str] = "cpu"
-    cpu_cores: Optional[int] = 6
 
 
 @app.post("/api/video/match-legacy")
