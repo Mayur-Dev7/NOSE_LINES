@@ -680,6 +680,10 @@ def extract_five_muzzle_stages(
         matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
+        # Store the matcher arrays after stage extraction; they remain backend-only.
+        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
+        matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
+        matcher_gray = enhanced_gray.copy()
         frames_records.append({
             "frame_number": i + 1,
             "frame_idx": f_idx,
