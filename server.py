@@ -1021,6 +1021,55 @@ class ExtractVideoFiveFramesRequest(BaseModel):
     min_spur_length: Optional[int] = 8
     min_component_size: Optional[int] = 30
 
+@app.post("/api/video/extract-five-muzzle-parameters")
+async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
+    """
+    Extracts 5 muzzle images and ten display parameters. The backend caches internal
+    NumPy arrays for spatial matching and strips those arrays from the HTTP response.
+    """
+    resolved_v = resolve_video_path(req.video_path)
+    if not resolved_v or not resolved_v.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
+
+    from functools import partial
+    fn = partial(
+        extract_five_frames_groove_features,
+        video_path=str(resolved_v),
+        method=req.method or "frangi",
+        threshold_method=req.threshold_method or "adaptive",
+        adaptive_block_size=int(req.adaptive_block_size or 15),
+        adaptive_c=int(req.adaptive_c or 2),
+        exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+        device=req.device or "cpu",
+        cpu_cores=int(req.cpu_cores or 6),
+        min_spur_length=int(req.min_spur_length or 8),
+        min_component_size=int(req.min_component_size or 30),
+    )
+    try:
+        async with _EXTRACTION_LOCK:
+            res = await asyncio.to_thread(fn)
+        cache_key = _spatial_cache_key(
+            resolved_v,
+            req.method or "frangi",
+            req.threshold_method or "adaptive",
+            int(req.adaptive_block_size or 15),
+            int(req.adaptive_c or 2),
+            bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+            int(req.min_spur_length or 8),
+            int(req.min_component_size or 30),
+            req.device or "cpu",
+            int(req.cpu_cores or 6),
+        )
+        _put_extraction_cache(cache_key, res.get("frames") or [])
+        safe = dict(res)
+        safe["frames"] = [_json_safe_frame(frame) for frame in (res.get("frames") or [])]
+        return safe
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"5-Frame extraction failed: {exc}")
+
+
 class CosineSimilarityRequest(BaseModel):
     vector_a: List[float]
     vector_b: List[float]
