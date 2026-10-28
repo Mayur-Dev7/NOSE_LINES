@@ -59,6 +59,7 @@ import time
 import json
 import logging
 import argparse
+import threading
 from typing import List, Dict, Tuple, Optional, Any
 
 import cv2
@@ -278,6 +279,15 @@ class MuzzleDetectionPipeline:
         t_load = (time.perf_counter() - t0) * 1000
         self.logger.info(f"Model successfully loaded and initialized in {t_load:.1f} ms")
 
+        # Retain graph & session for thread-safe cross-thread execution
+        import tensorflow.compat.v1 as tf
+        self.graph = tf.get_default_graph()
+        try:
+            self.session = tf.keras.backend.get_session()
+        except Exception:
+            self.session = tf.Session(graph=self.graph)
+        self.lock = threading.Lock()
+
     def process_image(
         self,
         image_input,
@@ -321,31 +331,35 @@ class MuzzleDetectionPipeline:
 
         orig_h, orig_w = image_rgb.shape[:2]
 
-        # Step 2: Preprocess / Mold input
-        t0 = time.perf_counter()
-        molded_images, image_metas, windows = self.model.mold_inputs([image_rgb])
-        molded_image_shape = molded_images[0].shape
-        windows = windows[0]
-        timings["t_preprocess_ms"] = (time.perf_counter() - t0) * 1000
+        # Thread-safe graph & session context for prediction
+        with self.lock:
+            with self.graph.as_default():
+                with self.session.as_default():
+                    # Step 2: Preprocess / Mold input
+                    t0 = time.perf_counter()
+                    molded_images, image_metas, windows = self.model.mold_inputs([image_rgb])
+                    molded_image_shape = molded_images[0].shape
+                    windows = windows[0]
+                    timings["t_preprocess_ms"] = (time.perf_counter() - t0) * 1000
 
-        # Step 3: Neural network forward inference
-        t0 = time.perf_counter()
-        # Compute anchors
-        anchors = self.model.get_anchors(molded_image_shape)
-        anchors = np.broadcast_to(anchors, (self.config.BATCH_SIZE,) + anchors.shape)
-        
-        # Run detection forward pass
-        detections, _, _, mrcnn_mask, _, _, _ = self.model.keras_model.predict(
-            [molded_images, image_metas, anchors], verbose=0
-        )
-        timings["t_inference_ms"] = (time.perf_counter() - t0) * 1000
+                    # Step 3: Neural network forward inference
+                    t0 = time.perf_counter()
+                    # Compute anchors
+                    anchors = self.model.get_anchors(molded_image_shape)
+                    anchors = np.broadcast_to(anchors, (self.config.BATCH_SIZE,) + anchors.shape)
+                    
+                    # Run detection forward pass
+                    detections, _, _, mrcnn_mask, _, _, _ = self.model.keras_model.predict(
+                        [molded_images, image_metas, anchors], verbose=0
+                    )
+                    timings["t_inference_ms"] = (time.perf_counter() - t0) * 1000
 
-        # Step 4: Post-process & Unmold detections
-        t0 = time.perf_counter()
-        rois, class_ids, scores, masks = self.model.unmold_detections(
-            detections[0], mrcnn_mask[0], image_rgb.shape, molded_image_shape, windows
-        )
-        timings["t_postprocess_ms"] = (time.perf_counter() - t0) * 1000
+                    # Step 4: Post-process & Unmold detections
+                    t0 = time.perf_counter()
+                    rois, class_ids, scores, masks = self.model.unmold_detections(
+                        detections[0], mrcnn_mask[0], image_rgb.shape, molded_image_shape, windows
+                    )
+                    timings["t_postprocess_ms"] = (time.perf_counter() - t0) * 1000
 
         # Step 5: Crop muzzles
         t0 = time.perf_counter()

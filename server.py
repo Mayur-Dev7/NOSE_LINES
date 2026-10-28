@@ -977,6 +977,9 @@ class CosineSimilarityRequest(BaseModel):
     vector_b: List[float]
 
 
+_EXTRACTION_LOCK = asyncio.Lock()
+
+
 @app.post("/api/video/extract-five-muzzle-parameters")
 async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
     """
@@ -989,7 +992,6 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
     if not resolved_v or not resolved_v.exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
 
-    import asyncio
     from functools import partial
 
     loop = asyncio.get_event_loop()
@@ -1005,8 +1007,9 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
         cpu_cores=int(req.cpu_cores or 6),
     )
     try:
-        res = await loop.run_in_executor(None, fn)
-        return res
+        async with _EXTRACTION_LOCK:
+            res = await loop.run_in_executor(None, fn)
+            return res
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"5-Frame extraction failed: {str(e)}")
 

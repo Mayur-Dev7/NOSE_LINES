@@ -125,6 +125,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
   // Extract 5 images & groove lines for Video A
   const handleExtractVideoA = async () => {
+    if (loadingA || loadingB) return;
     setLoadingA(true);
     setSimilarityResult(null);
     setExtractLogA('Running Mask R-CNN detector (crop11dec.h5) on video frames...');
@@ -160,6 +161,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
   // Extract 5 images & groove lines for Video B
   const handleExtractVideoB = async () => {
+    if (loadingA || loadingB) return;
     setLoadingB(true);
     setSimilarityResult(null);
     setExtractLogB('Running Mask R-CNN detector (crop11dec.h5) on video frames...');
@@ -193,8 +195,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     }
   };
 
-  // Extract both videos
+  // Extract both videos sequentially
   const handleExtractBoth = async () => {
+    if (loadingA || loadingB) return;
     await handleExtractVideoA();
     await handleExtractVideoB();
   };
@@ -498,9 +501,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           {/* Extraction Trigger */}
           <button
             onClick={handleExtractVideoA}
-            disabled={loadingA}
+            disabled={loadingA || loadingB}
             className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
-              loadingA
+              loadingA || loadingB
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/20'
             }`}
@@ -661,9 +664,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           {/* Extraction Trigger */}
           <button
             onClick={handleExtractVideoB}
-            disabled={loadingB}
+            disabled={loadingA || loadingB}
             className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
-              loadingB
+              loadingA || loadingB
                 ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
                 : 'bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 shadow-teal-500/20'
             }`}
