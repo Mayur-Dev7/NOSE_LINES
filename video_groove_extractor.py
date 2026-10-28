@@ -276,6 +276,91 @@ def align_muzzle_canonical(
     return aligned_bgr, aligned_mask, round(float(angle_deg), 2)
 
 
+
+
+
+def canonical_align_muzzle(crop_bgr, mask, target_size=448):
+    """Align nostrils using local-background contrast; fall back to the mask principal axis.
+
+    Returns (aligned_bgr, aligned_mask, meta), preserving the legacy align_muzzle_canonical API.
+    """
+    if crop_bgr is None or crop_bgr.size == 0:
+        empty = np.zeros((target_size, target_size, 3), dtype=np.uint8)
+        return empty, (np.zeros((target_size, target_size), dtype=np.uint8) if mask is not None else None), {
+            "alignment_method": "empty_fallback", "rotation_deg": 0.0
+        }
+    image = crop_bgr
+    h, w = image.shape[:2]
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image.copy()
+    valid = np.full((h, w), 255, dtype=np.uint8)
+    if mask is not None and np.asarray(mask).size:
+        m = np.asarray(mask)
+        if m.ndim == 3:
+            m = cv2.cvtColor(m, cv2.COLOR_BGR2GRAY)
+        if m.shape[:2] != (h, w):
+            m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
+        valid = np.where(m > 0, 255, 0).astype(np.uint8)
+
+    # Difference from a broad local background; this avoids a global percentile
+    # and lets small (3-5% of mask) dark nostril cavities remain candidates.
+    smooth_bg = cv2.GaussianBlur(gray, (0, 0), sigmaX=max(3.0, min(h, w) / 18.0))
+    dark_response = cv2.subtract(smooth_bg, gray)
+    dark_response[valid == 0] = 0
+    roi_h = max(1, int(h * 0.65))
+    local = dark_response[:roi_h]
+    local_mask = valid[:roi_h]
+    nonzero = local[(local_mask > 0) & (local > 0)]
+    angle = 0.0
+    method = "mask_principal_axis"
+    points = []
+    if nonzero.size:
+        # Robust local-response threshold, independent of the global image histogram.
+        threshold = max(8.0, float(np.mean(nonzero) + 0.55 * np.std(nonzero)))
+        binary = np.where((local >= threshold) & (local_mask > 0), 255, 0).astype(np.uint8)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+        count, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        mask_area = max(1, int(np.count_nonzero(local_mask)))
+        candidates = []
+        for lab in range(1, count):
+            area = int(stats[lab, cv2.CC_STAT_AREA])
+            # A nostril can be very small relative to the muzzle; reject specks only.
+            if area < max(4, int(mask_area * 0.001)) or area > mask_area * 0.20:
+                continue
+            cx, cy = centroids[lab]
+            if w * 0.12 <= cx <= w * 0.88:
+                candidates.append((area, float(cx), float(cy)))
+        pairs = []
+        for i, left in enumerate(candidates):
+            for right in candidates[i + 1:]:
+                a, b = sorted((left, right), key=lambda item: item[1])
+                dx, dy = b[1] - a[1], b[2] - a[2]
+                candidate_angle = math.degrees(math.atan2(dy, dx))
+                if dx >= w * 0.16 and abs(candidate_angle) <= 40.0:
+                    pairs.append((a[0] + b[0], candidate_angle, a, b))
+        if pairs:
+            _, raw_angle, left, right = max(pairs, key=lambda pair: pair[0])
+            angle = float(raw_angle)
+            method = "local_nostril_contrast"
+            points = [[left[1], left[2]], [right[1], right[2]]]
+
+    if method != "local_nostril_contrast" and np.count_nonzero(valid) > 50:
+        moments = cv2.moments(valid)
+        if abs(moments["mu20"] - moments["mu02"]) > 1e-4 or abs(moments["mu11"]) > 1e-4:
+            raw = math.degrees(0.5 * math.atan2(2.0 * moments["mu11"], moments["mu20"] - moments["mu02"]))
+            angle = float(((raw + 45.0) % 90.0) - 45.0)
+
+    matrix = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), angle, 1.0)
+    aligned = cv2.warpAffine(image, matrix, (w, h), flags=cv2.INTER_LANCZOS4, borderMode=cv2.BORDER_REFLECT)
+    aligned_mask = cv2.warpAffine(valid, matrix, (w, h), flags=cv2.INTER_NEAREST, borderMode=cv2.BORDER_CONSTANT, borderValue=0) if mask is not None else None
+    aligned = cv2.resize(aligned, (int(target_size), int(target_size)), interpolation=cv2.INTER_LANCZOS4)
+    if aligned_mask is not None:
+        aligned_mask = cv2.resize(aligned_mask, (int(target_size), int(target_size)), interpolation=cv2.INTER_NEAREST)
+    return aligned, aligned_mask, {
+        "alignment_method": method,
+        "rotation_deg": round(float(angle), 2),
+        "nostril_points": points,
+    }
+
 def extract_five_muzzle_stages(
     video_path: Union[str, Path],
     method: str = "frangi",                     # 'frangi' (Frangi Hessian) or 'blackhat'
