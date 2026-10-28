@@ -107,7 +107,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const fetchMatcherConfig = async () => {
     setLoadingConfig(true);
     try {
-      const res = await fetch('/api/video/matcher-config');
+      const res = await fetch('/api/video/match-config');
       if (res.ok) {
         const config = await res.json();
         setMatcherConfig(config);
@@ -256,7 +256,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     await handleExtractVideoB();
   };
 
-  // RUN BIOMETRIC VERIFICATION (SIFT + MINUTIAE)
+  // RUN SPATIAL BIOMETRIC VERIFICATION (10 parameters are display-only)
   const handleRunBiometricMatch = async () => {
     if (matchingBiometric) return;
     setMatchingBiometric(true);
@@ -276,8 +276,6 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
         exclude_nostrils: excludeNostrils,
         min_spur_length: parseInt(minSpurLength, 10),
         min_component_size: parseInt(minComponentSize, 10),
-        frames_a: dataA?.frames || null,
-        frames_b: dataB?.frames || null,
       };
 
       const res = await fetch('/api/video/match', {
@@ -301,7 +299,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     }
   };
 
-  // Calculate Cosine Similarity from LocalStorage (Fallback / Secondary metric)
+  // Legacy cosine utility remains available for diagnostics only; it is never the verdict.
+  // Calculate cosine similarity from LocalStorage (display-only diagnostic)
   const handleCalculateCosineSimilarity = async () => {
     let storedA = null;
     let storedB = null;
@@ -1061,15 +1060,15 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </span>
                 {biometricMatchResult.calibrated === false && (
                   <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 font-mono">
-                    UNCALIBRATED THRESHOLD
+                    UNCALIBRATED (DEV MODE)
                   </span>
                 )}
               </div>
               <div className="flex items-baseline gap-3 mt-1.5 flex-wrap">
                 <span className="text-5xl font-black tracking-tight text-white font-mono">
-                  {biometricMatchResult.composite_score !== undefined
-                    ? (biometricMatchResult.composite_score * 100).toFixed(1)
-                    : (biometricMatchResult.score !== undefined ? (biometricMatchResult.score * 100).toFixed(1) : 'N/A')}
+                  {biometricMatchResult.decision_score !== undefined
+                    ? (biometricMatchResult.decision_score * 100).toFixed(1)
+                    : 'N/A'}
                   %
                 </span>
                 <span className="text-xs text-slate-400 font-mono">
@@ -1090,24 +1089,24 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 {biometricMatchResult.calibrated === false ? (
                   <>
                     <AlertCircle className="w-5 h-5 text-amber-400" />
-                    <span>UNCALIBRATED &bull; {biometricMatchResult.is_match ? 'PROVISIONAL MATCH' : 'PROVISIONAL NO MATCH'}</span>
+                    <span>UNCALIBRATED (DEV MODE) &bull; {biometricMatchResult.dev_hint || 'DEV HINT UNAVAILABLE'}</span>
                   </>
-                ) : biometricMatchResult.is_match ? (
+                ) : biometricMatchResult.verdict === 'MATCH' ? (
                   <>
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span>MATCH (SAME CATTLE)</span>
+                    <span>MATCH</span>
                   </>
                 ) : (
                   <>
                     <XCircle className="w-5 h-5 text-rose-400" />
-                    <span>NO MATCH (DISTINCT CATTLE)</span>
+                    <span>{biometricMatchResult.verdict || 'NO_MATCH'}</span>
                   </>
                 )}
               </div>
               <span className="text-[11px] font-mono text-slate-400">
                 Decision Threshold: {biometricMatchResult.threshold !== undefined && biometricMatchResult.threshold !== null
                   ? `${(biometricMatchResult.threshold * 100).toFixed(1)}%`
-                  : (calibratedThreshold !== null ? `${(calibratedThreshold * 100).toFixed(1)}%` : 'None (Uncalibrated)')}
+                  : `None (Uncalibrated; dev hint threshold ${(Number(biometricMatchResult.dev_provisional_threshold ?? 0.30) * 100).toFixed(1)}%)`}
               </span>
             </div>
           </div>
@@ -1122,23 +1121,22 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   Method A: SIFT / ORB + RANSAC
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
-                  Score: {biometricMatchResult.method_a?.score !== undefined ? (biometricMatchResult.method_a.score * 100).toFixed(1) : (biometricMatchResult.inlier_ratio !== undefined ? (biometricMatchResult.inlier_ratio * 100).toFixed(1) : 'N/A')}%
+                  Score: {biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score !== undefined ? (biometricMatchResult.method_a.score * 100).toFixed(1) : (biometricMatchResult.inlier_ratio !== undefined ? (biometricMatchResult.inlier_ratio * 100).toFixed(1) : 'N/A')}%
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 <div>
                   <span className="text-slate-400 block text-[11px]">RANSAC Inliers</span>
                   <span className="text-base font-bold text-emerald-300">
-                    {biometricMatchResult.inlier_count ?? biometricMatchResult.method_a?.inlier_count ?? 0}
+                    {biometricMatchResult.method_a_sift?.inlier_count ?? biometricMatchResult.inlier_count ?? biometricMatchResult.method_a?.inlier_count ?? 0}
                   </span>
                   <span className="text-[10px] text-slate-400 ml-1">inliers</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">Inlier Ratio</span>
                   <span className="text-base font-bold text-emerald-300">
-                    {biometricMatchResult.inlier_ratio !== undefined
-                      ? (biometricMatchResult.inlier_ratio * 100).toFixed(1)
-                      : (biometricMatchResult.method_a?.inlier_ratio !== undefined ? (biometricMatchResult.method_a.inlier_ratio * 100).toFixed(1) : 'N/A')}
+                    {(biometricMatchResult.method_a_sift?.inlier_ratio ?? biometricMatchResult.inlier_ratio ?? biometricMatchResult.method_a?.inlier_ratio) !== undefined
+                      ? ((biometricMatchResult.method_a_sift?.inlier_ratio ?? biometricMatchResult.inlier_ratio ?? biometricMatchResult.method_a?.inlier_ratio) * 100).toFixed(1) : 'N/A'}
                     %
                   </span>
                 </div>
@@ -1153,23 +1151,22 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   Method B: Skeleton Minutiae Topology
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-500/30 font-bold">
-                  Score: {biometricMatchResult.method_b?.score !== undefined ? (biometricMatchResult.method_b.score * 100).toFixed(1) : (biometricMatchResult.matched_minutiae_fraction !== undefined ? (biometricMatchResult.matched_minutiae_fraction * 100).toFixed(1) : 'N/A')}%
+                  Score: {biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score !== undefined ? (biometricMatchResult.method_b.score * 100).toFixed(1) : (biometricMatchResult.matched_minutiae_fraction !== undefined ? (biometricMatchResult.matched_minutiae_fraction * 100).toFixed(1) : 'N/A')}%
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 <div>
                   <span className="text-slate-400 block text-[11px]">Matched Minutiae</span>
                   <span className="text-base font-bold text-teal-300">
-                    {biometricMatchResult.method_b?.matched_count ?? biometricMatchResult.matched_minutiae_count ?? 0}
+                    {biometricMatchResult.method_b_minutiae?.matched_count ?? biometricMatchResult.method_b?.matched_count ?? biometricMatchResult.matched_minutiae_count ?? 0}
                   </span>
                   <span className="text-[10px] text-slate-400 ml-1">pairs</span>
                 </div>
                 <div>
                   <span className="text-slate-400 block text-[11px]">Matched Fraction</span>
                   <span className="text-base font-bold text-teal-300">
-                    {biometricMatchResult.matched_minutiae_fraction !== undefined
-                      ? (biometricMatchResult.matched_minutiae_fraction * 100).toFixed(1)
-                      : (biometricMatchResult.method_b?.matched_fraction !== undefined ? (biometricMatchResult.method_b.matched_fraction * 100).toFixed(1) : 'N/A')}
+                    {(biometricMatchResult.method_b_minutiae?.matched_fraction ?? biometricMatchResult.matched_minutiae_fraction ?? biometricMatchResult.method_b?.matched_fraction) !== undefined
+                      ? ((biometricMatchResult.method_b_minutiae?.matched_fraction ?? biometricMatchResult.matched_minutiae_fraction ?? biometricMatchResult.method_b?.matched_fraction) * 100).toFixed(1) : 'N/A'}
                     %
                   </span>
                 </div>
@@ -1178,12 +1175,12 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           </div>
 
           {/* Keypoint Match Visualization Image (Side-by-Side Match Viewer) */}
-          {biometricMatchResult.visual_url && (
+          {(biometricMatchResult.match_viz_base64 || biometricMatchResult.visual_url) && (
             <div className="flex flex-col gap-2 pt-2">
               <div className="flex items-center justify-between">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
                   <Eye className="w-4 h-4 text-emerald-400" />
-                  Keypoint Match Alignment Visualization (Best Frame Pair)
+                  Spatial Match Visualization (Best Frame Pair)
                 </h4>
                 <button
                   onClick={() => setVisualModalOpen(true)}
@@ -1199,8 +1196,10 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 className="group relative rounded-xl border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-emerald-500/80 transition-all max-h-96 flex items-center justify-center"
               >
                 <img
-                  src={biometricMatchResult.visual_url}
-                  alt="Biometric Keypoint Match Visualization"
+                  src={biometricMatchResult.match_viz_base64
+                    ? `data:image/png;base64,${biometricMatchResult.match_viz_base64}`
+                    : biometricMatchResult.visual_url}
+                  alt="Spatial muzzle match visualization"
                   className="w-full h-full object-contain max-h-96 group-hover:scale-[1.01] transition-transform"
                 />
                 <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -1218,7 +1217,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
               <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
                 <Layers className="w-4 h-4 text-emerald-400" />
-                10-Parameter Muzzle Groove Characteristics (Display Reference)
+                10 Parameters — Display Only (Not Used for Verdict)
               </h4>
 
               <div className="overflow-x-auto rounded-xl border border-slate-800">
@@ -1386,7 +1385,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               <div className="flex items-center gap-2">
                 <Crosshair className="w-5 h-5 text-emerald-400" />
                 <span className="font-bold text-white text-base">
-                  SIFT / ORB Keypoint Inlier Alignment &bull; Best Frame Pair
+                  Spatial Matcher Alignment &bull; Best Frame Pair
                 </span>
                 <span className="text-xs font-mono text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30">
                   {biometricMatchResult.inlier_count ?? biometricMatchResult.method_a?.inlier_count ?? 0} Inliers
@@ -1402,15 +1401,17 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
             <div className="w-full flex-1 min-h-[300px] overflow-auto rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center p-2">
               <img
-                src={biometricMatchResult.visual_url}
-                alt="Full Keypoint Match Alignment"
+                src={biometricMatchResult.match_viz_base64
+                  ? `data:image/png;base64,${biometricMatchResult.match_viz_base64}`
+                  : biometricMatchResult.visual_url}
+                alt="Full spatial match alignment"
                 className="max-w-full max-h-[75vh] object-contain rounded-lg"
               />
             </div>
 
             <div className="flex items-center justify-between text-xs font-mono text-slate-400 pt-2 border-t border-slate-800">
               <div>
-                Composite Score: <strong className="text-white">{((biometricMatchResult.composite_score ?? 0) * 100).toFixed(1)}%</strong> | Inlier Ratio: <strong className="text-emerald-300">{((biometricMatchResult.inlier_ratio ?? 0) * 100).toFixed(1)}%</strong> | Minutiae: <strong className="text-teal-300">{((biometricMatchResult.matched_minutiae_fraction ?? 0) * 100).toFixed(1)}%</strong>
+                Decision Score: <strong className="text-white">{((biometricMatchResult.decision_score ?? 0) * 100).toFixed(1)}%</strong> | Inlier Ratio: <strong className="text-emerald-300">{((biometricMatchResult.inlier_ratio ?? 0) * 100).toFixed(1)}%</strong> | Minutiae: <strong className="text-teal-300">{((biometricMatchResult.matched_minutiae_fraction ?? 0) * 100).toFixed(1)}%</strong>
               </div>
               <button
                 onClick={() => setVisualModalOpen(false)}
