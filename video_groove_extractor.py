@@ -586,9 +586,11 @@ def extract_five_muzzle_stages(
         cv2.imwrite(str(p_crop), native_bgr)
 
         # 2. Canonical alignment & 2x Lanczos-4 target sizing (448x448)
-        aligned_bgr, aligned_mask, angle_deg = align_muzzle_canonical(
-            native_bgr, mask=crop_mask, target_size=(448, 448)
+        aligned_bgr, aligned_mask, align_meta = canonical_align_muzzle(
+            native_bgr, mask=crop_mask, target_size=448
         )
+        angle_deg = float(align_meta.get("rotation_deg", 0.0))
+        alignment_method = align_meta.get("alignment_method", "mask_principal_axis")
         upscaled_bgr = aligned_bgr
         mask_up = aligned_mask
 
@@ -707,7 +709,7 @@ def extract_five_muzzle_stages(
             "clahe_gray": matcher_gray,
             "mask": matcher_mask,
             "skeleton": matcher_skeleton,
-            "alignment_method": "legacy_align_muzzle_canonical",
+            "alignment_method": alignment_method,
             "rotation_deg": round(float(angle_deg), 2),
             "minutiae": minutiae,
         })
