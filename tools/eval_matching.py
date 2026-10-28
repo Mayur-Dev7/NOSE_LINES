@@ -815,213 +815,27 @@ def plot_roc_curve(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Cattle Muzzle Biometric Evaluation Harness and ROC/EER Calibration Specialist",
+        description="Spatial matcher evaluation and calibration CLI",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--dataset-dir",
-        default=str(PROJECT_ROOT / "dataset"),
-        help="Path to cattle video dataset directory with subdirectories for cow IDs",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default=str(PROJECT_ROOT / "output" / "eval"),
-        help="Directory to save evaluation reports and visualization plots",
-    )
-    parser.add_argument(
-        "--config-out",
-        default=str(PROJECT_ROOT / "matcher_config.json"),
-        help="Output path for calibrated matcher_config.json",
-    )
-    parser.add_argument(
-        "--synthetic-demo",
-        action="store_true",
-        help="Generate synthetic demo video dataset and run end-to-end benchmark without real videos",
-    )
-    parser.add_argument(
-        "--device",
-        default="cpu",
-        choices=["cpu", "gpu"],
-        help="Computation device for Mask R-CNN detector",
-    )
-    parser.add_argument(
-        "--cpu-cores",
-        type=int,
-        default=6,
-        help="Number of CPU cores for feature extraction",
-    )
-    parser.add_argument(
-        "--max-impostor-pairs",
-        type=int,
-        default=40,
-        help="Maximum number of impostor video pairs to evaluate for fast execution",
-    )
-
+    parser.add_argument("--dataset-dir", default=str(PROJECT_ROOT / "dataset"))
+    parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "output" / "eval"))
+    parser.add_argument("--allow-dev-small-dataset", action="store_true",
+                        help="Report small dev dataset metrics without writing a threshold.")
     args = parser.parse_args()
 
-    dataset_path = Path(args.dataset_dir)
-    output_path = Path(args.output_dir)
-    config_path = Path(args.config_out)
+    if args.allow_dev_small_dataset:
+        # The development flag always prevents config writing, even if counts look sufficient.
+        import tempfile
+        params_path = PROJECT_ROOT / "config" / "matching_params.json"
+        report_path = Path(args.output_dir) / "spatial_matching_eval_report.json"
+        report = run_spatial_calibration(Path(args.dataset_dir), report_path, allow_dev_small_dataset=True)
+        print(json.dumps(report.get("pair_counts", {}), indent=2))
+        print("DEV SMALL DATASET: threshold file is never written with this flag.")
+        return
 
-    t0 = time.time()
-    logger.info("=== Starting Cattle Muzzle Biometric Evaluation & Calibration ===")
-
-    # 1. Dataset setup
-    if args.synthetic_demo:
-        generate_synthetic_demo_dataset(dataset_path)
-    else:
-        setup_default_dataset_if_needed(dataset_path)
-
-    # 2. Run Matching Evaluation
-    eval_results = run_evaluation(
-        dataset_dir=dataset_path,
-        output_dir=output_path,
-        device=args.device,
-        cpu_cores=args.cpu_cores,
-        max_impostor_pairs=args.max_impostor_pairs,
-        is_synthetic=args.synthetic_demo,
-    )
-
-    genuine_list = eval_results["genuine"]
-    impostor_list = eval_results["impostor"]
-    within_list = eval_results["within_video"]
-
-    genuine_scores = [r["composite_score"] for r in genuine_list]
-    impostor_scores = [r["composite_score"] for r in impostor_list]
-    within_scores = [r["composite_score"] for r in within_list]
-
-    # Collect granular sub-metric statistics
-    genuine_inliers = [r["sift_inlier_count"] for r in genuine_list]
-    genuine_ratios = [r["sift_inlier_ratio"] for r in genuine_list]
-    genuine_minutiae = [r["minutiae_match_fraction"] for r in genuine_list]
-
-    # 3. Biometric Calibration (ROC & EER)
-    roc_res = compute_roc_eer(genuine_scores, impostor_scores)
-
-    eer_val = roc_res["eer"]
-    eer_thresh = roc_res["eer_threshold"]
-    roc_auc = roc_res["roc_auc"]
-
-    # Recommended minimal biometric thresholds from genuine distribution percentiles
-    min_sift_inliers = int(np.percentile(genuine_inliers, 10)) if genuine_inliers else 12
-    min_inlier_ratio = round(float(np.percentile(genuine_ratios, 10)), 3) if genuine_ratios else 0.25
-    min_minutiae_frac = round(float(np.percentile(genuine_minutiae, 10)), 3) if genuine_minutiae else 0.15
-
-    # 4. Generate Calibration Config (matcher_config.json)
-    calibrated_config = {
-        "calibrated": True,
-        "calibrated_at": datetime.utcnow().isoformat() + "Z",
-        "threshold": eer_thresh,
-        "eer": eer_val,
-        "roc_auc": roc_auc,
-        "min_sift_inliers": max(6, min_sift_inliers),
-        "min_inlier_ratio": max(0.15, min_inlier_ratio),
-        "min_minutiae_fraction": max(0.10, min_minutiae_frac),
-        "decision_metric": "composite_score",
-        "summary": {
-            "total_cows": eval_results["dataset_summary"]["total_cows"],
-            "total_videos": eval_results["dataset_summary"]["total_videos"],
-            "genuine_pairs_evaluated": len(genuine_list),
-            "impostor_pairs_evaluated": len(impostor_list),
-            "within_video_pairs_evaluated": len(within_list),
-            "genuine_mean_score": round(float(np.mean(genuine_scores)), 4) if genuine_scores else 0.0,
-            "impostor_mean_score": round(float(np.mean(impostor_scores)), 4) if impostor_scores else 0.0,
-            "tar_at_eer": roc_res["tar_at_eer"],
-            "far_at_eer": roc_res["far_at_eer"],
-        },
-    }
-
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(calibrated_config, f, indent=2)
-    logger.info(f"Saved calibrated matcher config: {config_path}")
-
-    # Also save a copy inside output_dir for records
-    with open(output_path / "matcher_config.json", "w", encoding="utf-8") as f:
-        json.dump(calibrated_config, f, indent=2)
-
-    # 5. Visual Plots
-    hist_paths = [
-        output_path / "score_distribution.png",
-        PROJECT_ROOT / "tools" / "score_distribution.png",
-    ]
-    plot_score_distributions(
-        genuine_scores=genuine_scores,
-        impostor_scores=impostor_scores,
-        within_video_scores=within_scores,
-        eer_threshold=eer_thresh,
-        eer=eer_val,
-        save_paths=hist_paths,
-    )
-
-    roc_paths = [
-        output_path / "roc_curve.png",
-        PROJECT_ROOT / "tools" / "roc_curve.png",
-    ]
-    plot_roc_curve(
-        far_list=roc_res["far_curve"],
-        tar_list=roc_res["tar_curve"],
-        roc_auc=roc_auc,
-        eer=eer_val,
-        eer_threshold=eer_thresh,
-        save_paths=roc_paths,
-    )
-
-    # 6. Comprehensive JSON Evaluation Report
-    report = {
-        "title": "Cattle Muzzle Biometric Verification Evaluation Report",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "dataset_summary": eval_results["dataset_summary"],
-        "metrics": {
-            "eer": eer_val,
-            "eer_threshold": eer_thresh,
-            "roc_auc": roc_auc,
-            "tar_at_eer": roc_res["tar_at_eer"],
-            "far_at_eer": roc_res["far_at_eer"],
-        },
-        "score_statistics": {
-            "genuine": compute_distribution_stats(genuine_scores),
-            "impostor": compute_distribution_stats(impostor_scores),
-            "within_video": compute_distribution_stats(within_scores),
-            "genuine_sift_inliers": compute_distribution_stats(genuine_inliers),
-            "genuine_inlier_ratio": compute_distribution_stats(genuine_ratios),
-            "genuine_minutiae_fraction": compute_distribution_stats(genuine_minutiae),
-        },
-        "threshold_analysis": roc_res["threshold_table"],
-        "genuine_comparisons": genuine_list,
-        "impostor_comparisons": impostor_list,
-        "within_video_comparisons": within_list,
-        "artifacts": {
-            "score_distribution_plot": str(output_path / "score_distribution.png"),
-            "roc_curve_plot": str(output_path / "roc_curve.png"),
-            "matcher_config": str(config_path),
-        },
-    }
-
-    report_path_1 = output_path / "matching_eval_report.json"
-    report_path_2 = PROJECT_ROOT / "tools" / "matching_eval_report.json"
-
-    with open(report_path_1, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
-    with open(report_path_2, "w", encoding="utf-8") as f:
-        json.dump(report, f, indent=2)
-
-    logger.info(f"Saved evaluation report: {report_path_1} and {report_path_2}")
-
-    elapsed = round(time.time() - t0, 2)
-    print("\n" + "=" * 70)
-    print(f"BIOMETRIC CALIBRATION COMPLETE in {elapsed}s")
-    print("=" * 70)
-    print(f"Optimal EER Threshold : {eer_thresh:.4f}")
-    print(f"Equal Error Rate (EER): {eer_val * 100:.2f}%")
-    print(f"Area Under ROC (AUC)  : {roc_auc:.4f}")
-    print(f"Genuine Pairs Evaluated: {len(genuine_list)} (Mean Score: {np.mean(genuine_scores):.4f})")
-    print(f"Impostor Pairs Evaluated: {len(impostor_list)} (Mean Score: {np.mean(impostor_scores):.4f})")
-    print(f"Within-Video Pairs     : {len(within_list)} (Mean Score: {np.mean(within_scores):.4f})")
-    print(f"Calibrated Config      : {config_path}")
-    print(f"Score Distribution Plot: {output_path / 'score_distribution.png'}")
-    print(f"ROC Curve Plot         : {output_path / 'roc_curve.png'}")
-    print("=" * 70 + "\n")
+    report_path = Path(args.output_dir) / "spatial_matching_eval_report.json"
+    run_spatial_calibration(Path(args.dataset_dir), report_path, allow_dev_small_dataset=False)
 
 
 if __name__ == "__main__":
