@@ -743,9 +743,15 @@ def extract_five_muzzle_stages(
         "timestamp": int(time.time()),
     }
 
-    # Save summary
+    # Matcher-only NumPy arrays stay in memory for the API cache and are never
+    # written to JSON files or exposed in HTTP JSON responses.
+    summary_payload = dict(result)
+    summary_payload["frames"] = [
+        {key: value for key, value in frame.items() if not isinstance(value, np.ndarray)}
+        for frame in frames_records
+    ]
     with open(cache_dir / "summary.json", "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+        json.dump(summary_payload, f, indent=2)
 
     log(f"Completed 5-frame groove parameter extraction for {v_path.name} successfully.")
     return result
