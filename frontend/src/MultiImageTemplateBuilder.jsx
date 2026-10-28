@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Layers,
   CheckCircle2,
@@ -1270,7 +1270,25 @@ export default function MultiImageTemplateBuilder({ sampleVideos = [] }) {
     const totalCount = template?.batch_summary?.submitted_count || 5;
 
     return mapping.map((m) => {
-      const stat = template.consensus_features[m.key] || { median: 0, mad: 0, stability: 0, count: contributingCount };
+      const keyCandidates = [
+        m.key,
+        `${m.key}_count`,
+        `skeleton_${m.key}`,
+        m.key === 'skeleton_pixels' ? 'skeleton_pixel_count' : null,
+        m.key === 'density' ? 'skeleton_density' : null,
+      ].filter(Boolean);
+
+      let stat = null;
+      for (const k of keyCandidates) {
+        if (template.consensus_features && template.consensus_features[k]) {
+          stat = template.consensus_features[k];
+          break;
+        }
+      }
+      if (!stat) {
+        stat = { median: 0, mad: 0, stability: 0, count: contributingCount };
+      }
+
       return {
         key: m.key,
         name: m.name,
@@ -1564,10 +1582,10 @@ export default function MultiImageTemplateBuilder({ sampleVideos = [] }) {
             const g = img.graph_descriptors || {};
 
             // Determine image source based on active toggle
-            let stageImageUrl = img.crop_url;
-            if (currentStage === 'mask' && img.mask_url) stageImageUrl = img.mask_url;
-            if (currentStage === 'skeleton' && img.skeleton_url) stageImageUrl = img.skeleton_url;
-            if (currentStage === 'overlay' && img.graph_overlay_url) stageImageUrl = img.graph_overlay_url;
+            let stageImageUrl = img.crop_url || img.image_url;
+            if (currentStage === 'mask') stageImageUrl = img.mask_url || img.artifacts?.groove_mask || stageImageUrl;
+            if (currentStage === 'skeleton') stageImageUrl = img.skeleton_url || img.artifacts?.groove_skeleton || stageImageUrl;
+            if (currentStage === 'overlay') stageImageUrl = img.graph_overlay_url || img.artifacts?.graph_overlay || img.artifacts?.groove_overlay || stageImageUrl;
 
             return (
               <div
