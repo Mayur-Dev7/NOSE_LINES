@@ -963,7 +963,13 @@ async def export_template_csv_endpoint(export_type: str, template_id: str):
 
 class ExtractVideoFiveFramesRequest(BaseModel):
     video_path: str
-    force_recompute: Optional[bool] = False
+    method: Optional[str] = "frangi"                     # 'frangi' (Frangi Hessian) or 'blackhat'
+    threshold_method: Optional[str] = "adaptive"         # 'adaptive' (Adaptive Gaussian) or 'otsu' (Standard)
+    adaptive_block_size: Optional[int] = 15
+    adaptive_c: Optional[int] = 2
+    exclude_nostrils: Optional[bool] = True
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
 
 
 class CosineSimilarityRequest(BaseModel):
@@ -974,8 +980,10 @@ class CosineSimilarityRequest(BaseModel):
 @app.post("/api/video/extract-five-muzzle-parameters")
 async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
     """
-    Extracts 5 muzzle images from video, extracts groove lines & skeletons,
-    and returns 10 topological parameters per image plus consolidated vector.
+    Extracts 5 muzzle images from video with Mask R-CNN, 2x Lanczos-4 upscales,
+    CLAHE grayscale enhances, runs Frangi Hessian / Black-Hat filtering,
+    applies Adaptive Gaussian / Otsu thresholding to produce 5th-stage line skeletons,
+    and returns 10 topological parameters from line coordinates.
     """
     resolved_v = resolve_video_path(req.video_path)
     if not resolved_v or not resolved_v.exists():
@@ -988,7 +996,13 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
     fn = partial(
         extract_five_frames_groove_features,
         video_path=str(resolved_v),
-        force_recompute=req.force_recompute or False,
+        method=req.method or "frangi",
+        threshold_method=req.threshold_method or "adaptive",
+        adaptive_block_size=int(req.adaptive_block_size or 15),
+        adaptive_c=int(req.adaptive_c or 2),
+        exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+        device=req.device or "cpu",
+        cpu_cores=int(req.cpu_cores or 6),
     )
     try:
         res = await loop.run_in_executor(None, fn)

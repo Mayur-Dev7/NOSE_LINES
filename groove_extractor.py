@@ -469,6 +469,8 @@ def extract_muzzle_grooves_pipeline(
     method: str = "blackhat",
     scales: List[int] = [9, 15, 21],
     threshold_method: str = "otsu",
+    adaptive_block_size: int = 15,
+    adaptive_c: int = 2,
     min_component_size: int = 15,
     exclude_nostrils: bool = True,
     output_dir: Optional[str] = None,
@@ -527,6 +529,8 @@ def extract_muzzle_grooves_pipeline(
         enhanced,
         clean_mask,
         threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
         min_component_size=min_component_size,
     )
 
