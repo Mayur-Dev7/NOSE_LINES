@@ -421,6 +421,7 @@ def extract_five_muzzle_stages(
     min_mask_area_ratio = float(matcher_params.get("min_mask_area_ratio", 0.05))
     border_margin_px = max(0, int(matcher_params.get("border_margin_px", 6)))
     min_laplacian_var = float(matcher_params.get("min_laplacian_var", 35.0))
+    mask_erosion_px = max(0, int(matcher_params.get("mask_erosion_px", 10)))
     canonical_size = max(32, int(matcher_params.get("canonical_size", 448)))
 
     stem = v_path.stem
@@ -492,6 +493,28 @@ def extract_five_muzzle_stages(
 
         best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
         conf = float(best_det.get("confidence", 0.0))
+
+        # Measure sharpness inside the eroded muzzle mask to reduce background influence.
+        full_mask_for_quality = best_det.get("mask")
+        if full_mask_for_quality is not None and np.asarray(full_mask_for_quality).size:
+            quality_mask = np.asarray(full_mask_for_quality)
+            if quality_mask.ndim == 3:
+                quality_mask = cv2.cvtColor(quality_mask, cv2.COLOR_BGR2GRAY)
+            if quality_mask.shape[:2] != gray.shape[:2]:
+                quality_mask = cv2.resize(quality_mask.astype(np.uint8), (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_NEAREST)
+            quality_mask = np.where(quality_mask > 0, 255, 0).astype(np.uint8)
+            if mask_erosion_px > 0:
+                erosion_kernel = cv2.getStructuringElement(
+                    cv2.MORPH_ELLIPSE, (2 * mask_erosion_px + 1, 2 * mask_erosion_px + 1)
+                )
+                eroded_quality_mask = cv2.erode(quality_mask, erosion_kernel)
+            else:
+                eroded_quality_mask = quality_mask
+            if np.count_nonzero(eroded_quality_mask) >= 64:
+                laplacian_map = cv2.Laplacian(gray, cv2.CV_64F)
+                laplacian_values = laplacian_map[eroded_quality_mask > 0]
+                if laplacian_values.size:
+                    lap_var = float(np.var(laplacian_values))
 
         # Quality gating checks:
         # 1. Low confidence (< 0.70)
