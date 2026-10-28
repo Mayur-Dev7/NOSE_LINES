@@ -1231,7 +1231,7 @@ async def match_video_legacy_endpoint(req: VideoMatchRequest):
             device=req.device or "cpu", cpu_cores=int(req.cpu_cores or 6), output_dir=OUTPUT_DIR)
         try:
             async with _EXTRACTION_LOCK:
-                return await loop.run_in_executor(None, fn)
+                return await asyncio.to_thread(fn)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Legacy video matching failed: {exc}")
     raise HTTPException(status_code=400, detail="Legacy endpoint requires video paths or pre-extracted frame sets.")
