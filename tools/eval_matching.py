@@ -813,29 +813,142 @@ def plot_roc_curve(
 # 6. Main Evaluation Orchestrator & CLI
 # ==============================================================================
 
+
+def run_spatial_calibration(dataset_dir: Path, report_path: Path, allow_dev_small_dataset: bool = False):
+    """Evaluate spatial scores, held-out cow split, ROC/EER, and optional threshold."""
+    import hashlib
+    from muzzle_matcher import match_video_sets
+
+    dataset_dir = Path(dataset_dir).resolve()
+    params_path = PROJECT_ROOT / "config" / "matching_params.json"
+    threshold_path = PROJECT_ROOT / "config" / "matching_threshold.json"
+    cows = scan_dataset(dataset_dir)
+    cow_ids = sorted(cows)
+    report = {
+        "dataset": str(dataset_dir),
+        "pair_counts_per_cow": {cow: len(cows[cow]) for cow in cow_ids},
+        "genuine_pairs": [],
+        "impostor_pairs": [],
+        "within_video_sanity": [],
+        "warnings": ["Genuine pairs recorded in the same session can overstate accuracy."],
+    }
+
+    def get_frames(path):
+        return extract_five_muzzle_stages(
+            str(path), method="frangi", threshold_method="adaptive",
+            device="cpu", cpu_cores=2
+        ).get("frames", [])
+
+    features = {}
+    for cow, videos in cows.items():
+        for path in videos:
+            try:
+                features[(cow, str(path))] = get_frames(path)
+            except Exception as exc:
+                logger.warning("Skipping %s: %s", path, exc)
+
+    usable = [(cow, path, frames) for (cow, path), frames in features.items() if frames]
+    by_cow = {}
+    for cow, path, frames in usable:
+        by_cow.setdefault(cow, []).append((path, frames))
+
+    genuine, impostor, within = [], [], []
+    for cow, videos in sorted(by_cow.items()):
+        for (pa, fa), (pb, fb) in itertools.combinations(videos, 2):
+            score = match_video_sets(fa, fb, params_path=str(params_path), threshold_path=str(threshold_path))["decision_score"]
+            genuine.append({"cow_id": cow, "video_a": str(pa), "video_b": str(pb), "score": score})
+        for path, frames in videos:
+            if len(frames) >= 2:
+                middle = max(1, len(frames) // 2)
+                score = match_video_sets(frames[:middle], frames[middle:], params_path=str(params_path), threshold_path=str(threshold_path))["decision_score"]
+                within.append({"cow_id": cow, "video": str(path), "score": score})
+
+    for (cow_a, path_a, frames_a), (cow_b, path_b, frames_b) in itertools.combinations(usable, 2):
+        if cow_a == cow_b:
+            continue
+        score = match_video_sets(frames_a, frames_b, params_path=str(params_path), threshold_path=str(threshold_path))["decision_score"]
+        impostor.append({"cow_a": cow_a, "cow_b": cow_b, "video_a": str(path_a), "video_b": str(path_b), "score": score})
+
+    # Deterministic cow-group split avoids putting videos from one cow in both sets.
+    ordered = sorted(cow_ids, key=lambda cow: hashlib.sha256(cow.encode("utf-8")).hexdigest())
+    split_at = max(1, int(len(ordered) * 0.6)) if ordered else 0
+    calibration_cows = set(ordered[:split_at])
+    genuine_cal = [r["score"] for r in genuine if r["cow_id"] in calibration_cows]
+    impostor_cal = [r["score"] for r in impostor if r["cow_a"] in calibration_cows and r["cow_b"] in calibration_cows]
+    genuine_held = [r["score"] for r in genuine if r["cow_id"] not in calibration_cows]
+    impostor_held = [r["score"] for r in impostor if r["cow_a"] not in calibration_cows and r["cow_b"] not in calibration_cows]
+
+    def far_frr(threshold, genuine_scores, impostor_scores):
+        far = sum(score >= threshold for score in impostor_scores) / max(1, len(impostor_scores))
+        frr = sum(score < threshold for score in genuine_scores) / max(1, len(genuine_scores))
+        return {"FAR": far, "FRR": frr}
+
+    candidates = sorted(set([0.0, 1.0] + genuine_cal + impostor_cal))
+    _, eer_threshold = min(
+        ((abs(far_frr(t, genuine_cal, impostor_cal)["FAR"] - far_frr(t, genuine_cal, impostor_cal)["FRR"]), t) for t in candidates),
+        default=(1.0, 0.30),
+    )
+    enough = len(genuine_cal) >= 30 and len(impostor_cal) >= 30
+    report.update({
+        "pair_counts": {"genuine": len(genuine), "impostor": len(impostor), "within_video": len(within),
+                        "calibration_genuine": len(genuine_cal), "calibration_impostor": len(impostor_cal),
+                        "heldout_genuine": len(genuine_held), "heldout_impostor": len(impostor_held)},
+        "calibration_cow_ids": sorted(calibration_cows),
+        "heldout_metrics": far_frr(eer_threshold, genuine_held, impostor_held),
+        "genuine_pairs": genuine,
+        "impostor_pairs": impostor,
+        "within_video_sanity": within,
+        "uncalibrated_warning": None if enough and not allow_dev_small_dataset else "Not enough qualifying calibration pairs or development-only mode.",
+    })
+
+    if enough and not allow_dev_small_dataset:
+        threshold_path.parent.mkdir(parents=True, exist_ok=True)
+        threshold_path.write_text(json.dumps({
+            "calibrated": True, "status": "CALIBRATED", "threshold": float(eer_threshold),
+            "genuine_pairs": len(genuine_cal), "impostor_pairs": len(impostor_cal),
+            "calibration_cow_ids": sorted(calibration_cows),
+            "heldout_metrics": far_frr(eer_threshold, genuine_held, impostor_held),
+            "warning": "Inspect held-out FAR/FRR and avoid same-session-only genuine pairs."
+        }, indent=2), encoding="utf-8")
+        report["calibration"] = {"calibrated": True, "threshold": float(eer_threshold)}
+    else:
+        report["calibration"] = {"calibrated": False, "threshold": None}
+        print("WARNING: threshold remains UNCALIBRATED; requires >=30 genuine and >=30 impostor calibration pairs.")
+        if allow_dev_small_dataset:
+            print("Development-only evaluation: no matching_threshold.json will be written.")
+
+    # Small-data runs still emit report and ROC/EER plots for diagnostics.
+    genuine_scores = [row["score"] for row in genuine]
+    impostor_scores = [row["score"] for row in impostor]
+    if genuine_scores or impostor_scores:
+        roc = compute_roc_eer(genuine_scores, impostor_scores)
+        report["roc_eer"] = {k: v for k, v in roc.items() if not isinstance(v, (np.ndarray,))}
+        hist_path = report_path.parent / "spatial_score_distribution.png"
+        roc_path = report_path.parent / "spatial_roc_curve.png"
+        plot_score_distributions(genuine_scores, impostor_scores, [r["score"] for r in within], eer_threshold, roc.get("eer", 0.0), [hist_path])
+        plot_roc_curve(roc["far_curve"], roc["tar_curve"], roc["roc_auc"], roc["eer"], eer_threshold, [roc_path])
+        report["plots"] = {"score_distribution": str(hist_path), "roc_curve": str(roc_path)}
+
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")
+    print("Pair counts per cow:", report["pair_counts_per_cow"])
+    print("Pair counts:", report["pair_counts"])
+    print("WARNING: genuine pairs from the same recording session can overstate accuracy.")
+    return report
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Spatial matcher evaluation and calibration CLI",
+        description="Spatial muzzle matcher evaluation and threshold calibration",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--dataset-dir", default=str(PROJECT_ROOT / "dataset"))
     parser.add_argument("--output-dir", default=str(PROJECT_ROOT / "output" / "eval"))
     parser.add_argument("--allow-dev-small-dataset", action="store_true",
-                        help="Report small dev dataset metrics without writing a threshold.")
+                        help="Write report/plots for small development folders without writing a threshold.")
     args = parser.parse_args()
-
-    if args.allow_dev_small_dataset:
-        # The development flag always prevents config writing, even if counts look sufficient.
-        import tempfile
-        params_path = PROJECT_ROOT / "config" / "matching_params.json"
-        report_path = Path(args.output_dir) / "spatial_matching_eval_report.json"
-        report = run_spatial_calibration(Path(args.dataset_dir), report_path, allow_dev_small_dataset=True)
-        print(json.dumps(report.get("pair_counts", {}), indent=2))
-        print("DEV SMALL DATASET: threshold file is never written with this flag.")
-        return
-
     report_path = Path(args.output_dir) / "spatial_matching_eval_report.json"
-    run_spatial_calibration(Path(args.dataset_dir), report_path, allow_dev_small_dataset=False)
+    run_spatial_calibration(Path(args.dataset_dir), report_path, allow_dev_small_dataset=args.allow_dev_small_dataset)
 
 
 if __name__ == "__main__":
