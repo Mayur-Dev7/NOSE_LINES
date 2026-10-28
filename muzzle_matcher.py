@@ -16,9 +16,11 @@ import os
 import sys
 import json
 import time
+import uuid
+import math
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional, Any
+from typing import List, Dict, Tuple, Optional, Any, Union
 
 import cv2
 import numpy as np
@@ -29,6 +31,17 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from groove_extractor import extract_muzzle_grooves_pipeline
+from groove_graph import extract_skeleton_graph
+
+logger = logging.getLogger("muzzle_matcher")
+
+# Biometric matching thresholds & canonical dimensions
+DEFAULT_DUPLICATE_THRESHOLD = 35
+DEFAULT_MATCH_THRESHOLD = 0.45
+CANONICAL_SIZE = (448, 448)
+CONFIG_PATH = SCRIPT_DIR / "matcher_config.json"
+MATCH_VISUAL_DIR = SCRIPT_DIR / "output" / "match_visualizations"
+MATCH_VISUAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def to_output_url(file_path: Optional[str]) -> Optional[str]:
@@ -250,6 +263,834 @@ def compare_two_muzzles(
         "kp2_count": len(kp2),
         "visual_path": visual_saved,
     }
+
+
+def load_matcher_config(config_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
+    """
+    Reads matcher_config.json if it exists.
+    If not found or uncalibrated, returns {"calibrated": False, "status": "UNCALIBRATED", "threshold": None}.
+    """
+    p = Path(config_path) if config_path else CONFIG_PATH
+    if p.exists() and p.is_file():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data.get("calibrated", False):
+                if "status" not in data:
+                    data["status"] = "CALIBRATED"
+                return data
+        except Exception as e:
+            logger.warning(f"Failed reading matcher config {p}: {e}")
+    return {"calibrated": False, "status": "UNCALIBRATED", "threshold": None}
+
+
+def match_sift_ransac(
+    gray1: np.ndarray,
+    gray2: np.ndarray,
+    nfeatures: int = 1500,
+    ratio_thresh: float = 0.75,
+    ransac_thresh: float = 5.0,
+    kp1: Optional[List[Any]] = None,
+    des1: Optional[np.ndarray] = None,
+    kp2: Optional[List[Any]] = None,
+    des2: Optional[np.ndarray] = None,
+) -> Dict[str, Any]:
+    """
+    Method A: SIFT Keypoint Matching with ORB Fallback + RANSAC Affine Alignment.
+    
+    Inputs:
+        gray1, gray2: Canonical 448x448 CLAHE grayscale muzzle crops.
+        nfeatures: Maximum number of keypoints to detect (default 1500).
+        ratio_thresh: Lowe's ratio test threshold (0.75).
+        ransac_thresh: RANSAC reprojection error threshold in pixels (5.0).
+        kp1, des1, kp2, des2: Optional precomputed keypoints and descriptors for reuse.
+        
+    Returns:
+        Dict with inlier_count, inlier_ratio, keypoint_overlap_ratio, score_method_a, etc.
+    """
+    if gray1.ndim == 3:
+        gray1 = cv2.cvtColor(gray1, cv2.COLOR_BGR2GRAY)
+    if gray2.ndim == 3:
+        gray2 = cv2.cvtColor(gray2, cv2.COLOR_BGR2GRAY)
+
+    if gray1.shape[:2] != CANONICAL_SIZE:
+        gray1 = cv2.resize(gray1, CANONICAL_SIZE, interpolation=cv2.INTER_LANCZOS4)
+    if gray2.shape[:2] != CANONICAL_SIZE:
+        gray2 = cv2.resize(gray2, CANONICAL_SIZE, interpolation=cv2.INTER_LANCZOS4)
+
+    detector_type = "sift"
+
+    # Step 1: Keypoint extraction with SIFT
+    if kp1 is None or des1 is None:
+        try:
+            sift = cv2.SIFT_create(nfeatures=nfeatures)
+            kp1, des1 = sift.detectAndCompute(gray1, None)
+        except Exception:
+            kp1, des1 = [], None
+
+    if kp2 is None or des2 is None:
+        try:
+            sift = cv2.SIFT_create(nfeatures=nfeatures)
+            kp2, des2 = sift.detectAndCompute(gray2, None)
+        except Exception:
+            kp2, des2 = [], None
+
+    # Step 2: Fallback to ORB if SIFT descriptors are empty/none/too sparse
+    if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
+        try:
+            orb = cv2.ORB_create(nfeatures=nfeatures)
+            kp1, des1 = orb.detectAndCompute(gray1, None)
+            kp2, des2 = orb.detectAndCompute(gray2, None)
+            detector_type = "orb"
+        except Exception:
+            pass
+
+    # Safety check if still empty
+    if des1 is None or des2 is None or len(des1) < 2 or len(des2) < 2:
+        return {
+            "detector": detector_type,
+            "kp1_count": len(kp1) if kp1 else 0,
+            "kp2_count": len(kp2) if kp2 else 0,
+            "good_matches_count": 0,
+            "inlier_count": 0,
+            "inlier_ratio": 0.0,
+            "keypoint_overlap_ratio": 0.0,
+            "score_method_a": 0.0,
+            "transform_matrix": None,
+            "inliers_mask": [],
+            "good_matches": [],
+            "kp1": kp1 or [],
+            "kp2": kp2 or [],
+        }
+
+    # Step 3: KNN matching with k=2 & Lowe's ratio test
+    if detector_type == "sift":
+        matcher = cv2.BFMatcher(cv2.NORM_L2)
+    else:
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+
+    try:
+        raw_matches = matcher.knnMatch(des1, des2, k=2)
+    except Exception:
+        raw_matches = []
+
+    good_matches = []
+    for pair in raw_matches:
+        if len(pair) == 2 and pair[0].distance < ratio_thresh * pair[1].distance:
+            good_matches.append(pair[0])
+
+    # Step 4: RANSAC partial affine fit (rotation + translation + uniform scale)
+    inlier_count = 0
+    inliers_mask = []
+    transform_matrix = None
+
+    if len(good_matches) >= 4:
+        pts1 = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+        pts2 = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+        M, mask = cv2.estimateAffinePartial2D(
+            pts1, pts2,
+            method=cv2.RANSAC,
+            ransacReprojThreshold=ransac_thresh,
+        )
+        if M is None or mask is None:
+            M, mask = cv2.estimateAffine2D(
+                pts1, pts2,
+                method=cv2.RANSAC,
+                ransacReprojThreshold=ransac_thresh,
+            )
+        if mask is not None:
+            inliers_mask = mask.ravel().astype(int).tolist()
+            inlier_count = int(sum(inliers_mask))
+            transform_matrix = M
+        else:
+            inliers_mask = [0] * len(good_matches)
+            inlier_count = 0
+    elif len(good_matches) > 0:
+        inliers_mask = [1] * len(good_matches)
+        inlier_count = len(good_matches)
+
+    # Step 5: Metric calculations
+    good_count = len(good_matches)
+    inlier_ratio = float(inlier_count / max(1, good_count))
+    keypoint_overlap_ratio = float(inlier_count / max(1, min(len(kp1), len(kp2))))
+    score_method_a = float(min(1.0, (inlier_count / 50.0) * 0.7 + inlier_ratio * 0.3))
+
+    return {
+        "detector": detector_type,
+        "kp1_count": len(kp1),
+        "kp2_count": len(kp2),
+        "good_matches_count": good_count,
+        "inlier_count": inlier_count,
+        "inlier_ratio": round(inlier_ratio, 4),
+        "keypoint_overlap_ratio": round(keypoint_overlap_ratio, 4),
+        "score_method_a": round(score_method_a, 4),
+        "transform_matrix": transform_matrix.tolist() if transform_matrix is not None else None,
+        "inliers_mask": inliers_mask,
+        "good_matches": good_matches,
+        "kp1": kp1,
+        "kp2": kp2,
+    }
+
+
+def extract_minutiae_points(
+    skeleton: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+    max_minutiae: int = 250,
+) -> List[Dict[str, Any]]:
+    """
+    Extracts topological minutiae points (endpoints & junctions) with spatial coordinates,
+    type, and orientation angle in degrees [0, 360).
+    """
+    if skeleton is None or skeleton.size == 0 or np.count_nonzero(skeleton) == 0:
+        return []
+
+    graph_res = extract_skeleton_graph(skeleton, mask=mask)
+    nodes = graph_res.get("nodes", {})
+    branches = graph_res.get("branches", [])
+
+    # Map node IDs to branches for orientation estimation
+    node_to_branches: Dict[int, List[Dict[str, Any]]] = {}
+    for b in branches:
+        u = b.get("start_node")
+        v = b.get("end_node")
+        if u is not None:
+            node_to_branches.setdefault(u, []).append(b)
+        if v is not None and v != u:
+            node_to_branches.setdefault(v, []).append(b)
+
+    H, W = skeleton.shape[:2]
+    minutiae = []
+
+    for nid, node in nodes.items():
+        pos = node.get("pos", (0.0, 0.0))
+        x, y = float(pos[0]), float(pos[1])
+        ntype = str(node.get("type", "endpoint"))
+
+        # Determine orientation angle: check node attributes or connected branches
+        b_list = node_to_branches.get(nid, [])
+        if "orientation" in node and node["orientation"] is not None:
+            orient_deg = float(node["orientation"])
+        elif b_list:
+            best_b = max(b_list, key=lambda b: b.get("arc_length", 0.0))
+            coords = best_b.get("pixel_coords", [])
+            if best_b.get("start_node") == nid and len(coords) >= 2:
+                step = min(4, len(coords) - 1)
+                py, px = coords[step]
+                orient_deg = float(math.degrees(math.atan2(py - y, px - x)))
+            elif best_b.get("end_node") == nid and len(coords) >= 2:
+                step = max(0, len(coords) - 5)
+                py, px = coords[step]
+                orient_deg = float(math.degrees(math.atan2(py - y, px - x)))
+            else:
+                orient_deg = float(best_b.get("orientation_deg", 0.0))
+        else:
+            orient_deg = 0.0
+
+        orient_deg = float(orient_deg % 360.0)
+        minutiae.append({
+            "x": round(x, 2),
+            "y": round(y, 2),
+            "type": ntype,
+            "orientation": round(orient_deg, 2),
+        })
+
+    # Limit to top minutiae by centrality if dense
+    if len(minutiae) > max_minutiae:
+        cx, cy = W / 2.0, H / 2.0
+        minutiae.sort(key=lambda m: (m["x"] - cx) ** 2 + (m["y"] - cy) ** 2)
+        minutiae = minutiae[:max_minutiae]
+
+    return minutiae
+
+
+def match_minutiae(
+    minutiae_a: Union[List[Dict[str, Any]], np.ndarray],
+    minutiae_b: Union[List[Dict[str, Any]], np.ndarray],
+    spatial_threshold: float = 15.0,
+    angular_threshold: float = 35.0,
+    max_trials: int = 120,
+) -> Dict[str, Any]:
+    """
+    Method B: Minutiae Matching from Skeleton Endpoints / Junctions using RANSAC.
+    
+    Aligns minutiae sets A and B with rigid/partial affine transformation,
+    and counts pairs satisfying distance < spatial_threshold and angle_diff < angular_threshold.
+    """
+    if isinstance(minutiae_a, np.ndarray):
+        minutiae_a = extract_minutiae_points(minutiae_a)
+    if isinstance(minutiae_b, np.ndarray):
+        minutiae_b = extract_minutiae_points(minutiae_b)
+
+    na = len(minutiae_a) if minutiae_a else 0
+    nb = len(minutiae_b) if minutiae_b else 0
+
+    if na < 2 or nb < 2:
+        return {
+            "matched_count": 0,
+            "matched_fraction": 0.0,
+            "score": 0.0,
+            "score_method_b": 0.0,
+            "minutiae_a_count": na,
+            "minutiae_b_count": nb,
+            "transform_matrix": None,
+        }
+
+    pts_a = np.float32([[m["x"], m["y"]] for m in minutiae_a]).reshape(-1, 1, 2)
+    pts_b = np.float32([[m["x"], m["y"]] for m in minutiae_b]).reshape(-1, 1, 2)
+    types_a = [m.get("type", "endpoint") for m in minutiae_a]
+    types_b = [m.get("type", "endpoint") for m in minutiae_b]
+
+    # Handle radians or degrees
+    raw_deg_a = [float(m.get("orientation", 0.0)) for m in minutiae_a]
+    raw_deg_b = [float(m.get("orientation", 0.0)) for m in minutiae_b]
+    if max(raw_deg_a or [0]) <= 2.0 * math.pi + 0.1 and max(raw_deg_a or [0]) > 0:
+        raw_deg_a = [math.degrees(a) for a in raw_deg_a]
+    if max(raw_deg_b or [0]) <= 2.0 * math.pi + 0.1 and max(raw_deg_b or [0]) > 0:
+        raw_deg_b = [math.degrees(b) for b in raw_deg_b]
+
+    deg_a = np.array(raw_deg_a, dtype=np.float32)
+    deg_b = np.array(raw_deg_b, dtype=np.float32)
+
+    def evaluate_transform(M: np.ndarray) -> Tuple[int, List[Tuple[int, int]]]:
+        trans_a = cv2.transform(pts_a, M).reshape(-1, 2)
+        rot_deg = math.degrees(math.atan2(M[1, 0], M[0, 0]))
+        trans_deg = (deg_a + rot_deg) % 360.0
+
+        # Vectorized Euclidean distance matrix (Na, Nb)
+        dx = pts_b[:, 0, 0][None, :] - trans_a[:, 0][:, None]
+        dy = pts_b[:, 0, 1][None, :] - trans_a[:, 1][:, None]
+        dist_sq = dx * dx + dy * dy
+
+        # Angular difference matrix (Na, Nb)
+        adiff = np.abs(trans_deg[:, None] - deg_b[None, :]) % 360.0
+        adiff = np.minimum(adiff, 360.0 - adiff)
+
+        type_match = np.array(types_a)[:, None] == np.array(types_b)[None, :]
+        valid = (dist_sq < (spatial_threshold ** 2)) & (adiff < angular_threshold) & type_match
+
+        valid_indices = np.argwhere(valid)
+        if len(valid_indices) == 0:
+            return 0, []
+
+        dists = dist_sq[valid_indices[:, 0], valid_indices[:, 1]]
+        order = np.argsort(dists)
+
+        used_a: Set[int] = set()
+        used_b: Set[int] = set()
+        matched: List[Tuple[int, int]] = []
+        for idx in order:
+            ia, ib = int(valid_indices[idx, 0]), int(valid_indices[idx, 1])
+            if ia not in used_a and ib not in used_b:
+                used_a.add(ia)
+                used_b.add(ib)
+                matched.append((ia, ib))
+
+        return len(matched), matched
+
+    # 1. Baseline: evaluate identity transform
+    best_M = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
+    best_count, best_matched = evaluate_transform(best_M)
+
+    # 2. RANSAC candidate pair alignment
+    eps_a = [i for i, t in enumerate(types_a) if t == "endpoint"]
+    eps_b = [i for i, t in enumerate(types_b) if t == "endpoint"]
+    juncs_a = [i for i, t in enumerate(types_a) if t == "junction"]
+    juncs_b = [i for i, t in enumerate(types_b) if t == "junction"]
+
+    rng = np.random.RandomState(42)
+    trials = 0
+
+    while trials < max_trials:
+        trials += 1
+        # Prefer matching same-type candidate pairs
+        use_eps = (len(eps_a) >= 2 and len(eps_b) >= 2) and (rng.rand() > 0.5 or len(juncs_a) < 2)
+        if use_eps:
+            pool_a, pool_b = eps_a, eps_b
+        elif len(juncs_a) >= 2 and len(juncs_b) >= 2:
+            pool_a, pool_b = juncs_a, juncs_b
+        else:
+            pool_a, pool_b = list(range(na)), list(range(nb))
+
+        ia1, ia2 = rng.choice(pool_a, 2, replace=False)
+        ib1, ib2 = rng.choice(pool_b, 2, replace=False)
+
+        d_a = math.hypot(pts_a[ia1, 0, 0] - pts_a[ia2, 0, 0], pts_a[ia1, 0, 1] - pts_a[ia2, 0, 1])
+        d_b = math.hypot(pts_b[ib1, 0, 0] - pts_b[ib2, 0, 0], pts_b[ib1, 0, 1] - pts_b[ib2, 0, 1])
+        if d_a < 15.0 or d_b < 15.0:
+            continue
+        ratio = d_a / max(1.0, d_b)
+        if ratio < 0.70 or ratio > 1.40:
+            continue
+
+        pair_a = np.float32([[pts_a[ia1, 0, 0], pts_a[ia1, 0, 1]], [pts_a[ia2, 0, 0], pts_a[ia2, 0, 1]]]).reshape(-1, 1, 2)
+        pair_b = np.float32([[pts_b[ib1, 0, 0], pts_b[ib1, 0, 1]], [pts_b[ib2, 0, 0], pts_b[ib2, 0, 1]]]).reshape(-1, 1, 2)
+
+        M, _ = cv2.estimateAffinePartial2D(pair_a, pair_b)
+        if M is None:
+            continue
+
+        scale = math.hypot(M[0, 0], M[0, 1])
+        if scale < 0.65 or scale > 1.50:
+            continue
+
+        cnt, matched = evaluate_transform(M)
+        if cnt > best_count:
+            best_count = cnt
+            best_matched = matched
+            best_M = M
+
+    # 3. Refinement: re-estimate partial affine from all matched inlier pairs
+    if best_count >= 4 and best_matched:
+        match_a_idx = [p[0] for p in best_matched]
+        match_b_idx = [p[1] for p in best_matched]
+        ref_pts_a = pts_a[match_a_idx]
+        ref_pts_b = pts_b[match_b_idx]
+        M_ref, _ = cv2.estimateAffinePartial2D(ref_pts_a, ref_pts_b)
+        if M_ref is not None:
+            cnt_ref, matched_ref = evaluate_transform(M_ref)
+            if cnt_ref >= best_count:
+                best_count = cnt_ref
+                best_matched = matched_ref
+                best_M = M_ref
+
+    matched_fraction = float(best_count / max(1, min(na, nb)))
+    score_b = round(matched_fraction, 4)
+
+    return {
+        "matched_count": best_count,
+        "matched_fraction": score_b,
+        "score": score_b,
+        "score_method_b": score_b,
+        "minutiae_a_count": na,
+        "minutiae_b_count": nb,
+        "transform_matrix": best_M.tolist() if best_M is not None else None,
+    }
+
+
+def _resolve_frame_data(
+    frame_obj: Any,
+) -> Tuple[np.ndarray, Optional[np.ndarray], List[Dict[str, Any]]]:
+    """
+    Resolves arbitrary frame representation into:
+    (canonical_gray_448, optional_skeleton_img, minutiae_list).
+    """
+    gray: Optional[np.ndarray] = None
+    skel: Optional[np.ndarray] = None
+    minutiae: List[Dict[str, Any]] = []
+
+    if isinstance(frame_obj, np.ndarray):
+        gray = frame_obj
+    elif isinstance(frame_obj, (str, Path)):
+        p = Path(frame_obj)
+        if p.exists():
+            gray = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+    elif isinstance(frame_obj, dict):
+        # 1. Grayscale image retrieval
+        for k in ["enhanced_gray", "enhanced_image", "cropped_bgr", "crop"]:
+            if isinstance(frame_obj.get(k), np.ndarray):
+                gray = frame_obj[k]
+                break
+
+        if gray is None:
+            for pk in ["enhanced_path", "crop_path"]:
+                pth = frame_obj.get(pk)
+                if pth and Path(pth).exists():
+                    gray = cv2.imread(str(pth), cv2.IMREAD_GRAYSCALE)
+                    break
+
+        if gray is None:
+            for uk in ["enhanced_url", "crop_url"]:
+                u = frame_obj.get(uk)
+                if u and isinstance(u, str):
+                    rel = u.lstrip("/")
+                    cand = SCRIPT_DIR / rel
+                    if cand.exists():
+                        gray = cv2.imread(str(cand), cv2.IMREAD_GRAYSCALE)
+                        break
+
+        # 2. Skeleton retrieval
+        for sk in ["groove_skeleton", "skeleton"]:
+            if isinstance(frame_obj.get(sk), np.ndarray):
+                skel = frame_obj[sk]
+                break
+
+        if skel is None:
+            sp = frame_obj.get("skeleton_path")
+            if sp and Path(sp).exists():
+                skel = cv2.imread(str(sp), cv2.IMREAD_GRAYSCALE)
+
+        if skel is None:
+            su = frame_obj.get("skeleton_url")
+            if su and isinstance(su, str):
+                rel = su.lstrip("/")
+                cand = SCRIPT_DIR / rel
+                if cand.exists():
+                    skel = cv2.imread(str(cand), cv2.IMREAD_GRAYSCALE)
+
+        # 3. Minutiae retrieval
+        if isinstance(frame_obj.get("minutiae"), list):
+            minutiae = frame_obj["minutiae"]
+
+    # Fallback placeholder if no image found
+    if gray is None:
+        gray = np.zeros(CANONICAL_SIZE, dtype=np.uint8)
+
+    if gray.ndim == 3:
+        gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
+
+    if gray.shape[:2] != CANONICAL_SIZE:
+        gray = cv2.resize(gray, CANONICAL_SIZE, interpolation=cv2.INTER_LANCZOS4)
+
+    # Extract minutiae if not pre-provided
+    if not minutiae:
+        if skel is not None:
+            minutiae = extract_minutiae_points(skel)
+        else:
+            # Extract groove skeleton from grayscale
+            try:
+                bgr_equiv = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                groove_out = extract_muzzle_grooves_pipeline(
+                    bgr_equiv,
+                    method="frangi",
+                    threshold_method="adaptive",
+                    exclude_nostrils=True,
+                )
+                skel = groove_out.get("groove_skeleton")
+                if skel is not None:
+                    minutiae = extract_minutiae_points(skel)
+            except Exception as e:
+                logger.warning(f"Failed fallback skeleton extraction: {e}")
+
+    return gray, skel, minutiae
+
+
+def match_muzzle_frame_sets(
+    frames_a: List[Any],
+    frames_b: List[Any],
+    output_dir: Optional[Union[str, Path]] = None,
+) -> Dict[str, Any]:
+    """
+    5x5 All-Pairs Cattle Muzzle Biometric Comparison:
+    - Compares all pairs (i, j) between Video A and Video B frame sets.
+    - Pair composite score = 0.65 * score_method_a + 0.35 * score_method_b.
+    - Computes Best Pair score and Median score across all 25 pairs.
+    - Overall Composite Score = 0.7 * best_score + 0.3 * median_score.
+    - Generates side-by-side keypoint visualization image for the best matching pair.
+    - Evaluates against calibrated threshold or default.
+    """
+    if not frames_a or not frames_b:
+        raise ValueError("Both frames_a and frames_b must contain at least 1 frame.")
+
+    out_dir = Path(output_dir) if output_dir else (SCRIPT_DIR / "output")
+    vis_dir = out_dir / "match_visualizations"
+    vis_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-extract features for all frames in A and B (10 extractions instead of 50)
+    data_a = []
+    for fa in frames_a:
+        g, sk, mins = _resolve_frame_data(fa)
+        sift = cv2.SIFT_create(nfeatures=1500)
+        try:
+            kp, des = sift.detectAndCompute(g, None)
+        except Exception:
+            kp, des = [], None
+        data_a.append({"gray": g, "kp": kp, "des": des, "minutiae": mins})
+
+    data_b = []
+    for fb in frames_b:
+        g, sk, mins = _resolve_frame_data(fb)
+        sift = cv2.SIFT_create(nfeatures=1500)
+        try:
+            kp, des = sift.detectAndCompute(g, None)
+        except Exception:
+            kp, des = [], None
+        data_b.append({"gray": g, "kp": kp, "des": des, "minutiae": mins})
+
+    n_a = len(data_a)
+    n_b = len(data_b)
+
+    pair_scores: List[List[float]] = [[0.0 for _ in range(n_b)] for _ in range(n_a)]
+    pair_details: Dict[Tuple[int, int], Tuple[Dict[str, Any], Dict[str, Any]]] = {}
+
+    best_pair_dict = {
+        "frame_a_idx": 0,
+        "frame_b_idx": 0,
+        "score": -1.0,
+        "inlier_count": 0,
+        "inlier_ratio": 0.0,
+        "matched_minutiae_fraction": 0.0,
+        "score_method_a": 0.0,
+        "score_method_b": 0.0,
+    }
+    best_res_a = {}
+    best_res_b = {}
+    all_scores: List[float] = []
+
+    # Evaluate all pairs (e.g. 5x5 = 25 pairs)
+    for i in range(n_a):
+        for j in range(n_b):
+            res_a = match_sift_ransac(
+                gray1=data_a[i]["gray"],
+                gray2=data_b[j]["gray"],
+                kp1=data_a[i]["kp"],
+                des1=data_a[i]["des"],
+                kp2=data_b[j]["kp"],
+                des2=data_b[j]["des"],
+            )
+
+            res_b = match_minutiae(
+                minutiae_a=data_a[i]["minutiae"],
+                minutiae_b=data_b[j]["minutiae"],
+            )
+
+            pair_comp = round(0.65 * res_a["score_method_a"] + 0.35 * res_b["score_method_b"], 4)
+            pair_scores[i][j] = pair_comp
+            all_scores.append(pair_comp)
+            pair_details[(i, j)] = (res_a, res_b)
+
+            if pair_comp > best_pair_dict["score"]:
+                best_pair_dict = {
+                    "frame_a_idx": i,
+                    "frame_b_idx": j,
+                    "score": pair_comp,
+                    "inlier_count": res_a["inlier_count"],
+                    "inlier_ratio": res_a["inlier_ratio"],
+                    "matched_minutiae_fraction": res_b["matched_fraction"],
+                    "score_method_a": res_a["score_method_a"],
+                    "score_method_b": res_b["score_method_b"],
+                }
+                best_res_a = res_a
+                best_res_b = res_b
+
+    best_score = float(max(0.0, best_pair_dict["score"]))
+    median_score = float(np.median(all_scores)) if all_scores else 0.0
+    composite_score = round(0.70 * best_score + 0.30 * median_score, 4)
+
+    # Determine threshold and verdict
+    cfg = load_matcher_config()
+    if cfg.get("calibrated") and cfg.get("threshold") is not None:
+        threshold = float(cfg["threshold"])
+        threshold_calibrated = True
+    else:
+        threshold = DEFAULT_MATCH_THRESHOLD
+        threshold_calibrated = False
+
+    is_match = bool(composite_score >= threshold)
+    verdict = "MATCH_SAME_CATTLE" if is_match else "DIFFERENT_CATTLE"
+
+    # Generate side-by-side keypoint match visualization image for best pair
+    bi = best_pair_dict["frame_a_idx"]
+    bj = best_pair_dict["frame_b_idx"]
+    gray_left = data_a[bi]["gray"]
+    gray_right = data_b[bj]["gray"]
+
+    bgr_left = cv2.cvtColor(gray_left, cv2.COLOR_GRAY2BGR)
+    bgr_right = cv2.cvtColor(gray_right, cv2.COLOR_GRAY2BGR)
+
+    good_matches = best_res_a.get("good_matches", [])
+    inliers_mask = best_res_a.get("inliers_mask", [])
+
+    inlier_matches = [
+        m for m, mask_v in zip(good_matches, inliers_mask) if mask_v == 1
+    ]
+    draw_matches = inlier_matches[:50] if inlier_matches else good_matches[:35]
+
+    match_canvas = cv2.drawMatches(
+        bgr_left, best_res_a.get("kp1", []),
+        bgr_right, best_res_a.get("kp2", []),
+        draw_matches,
+        None,
+        matchColor=(34, 197, 94) if is_match else (0, 165, 255),
+        singlePointColor=(110, 110, 110),
+        flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS,
+    )
+
+    # Draw header banner on top
+    banner_h = 56
+    banner = np.zeros((banner_h, match_canvas.shape[1], 3), dtype=np.uint8)
+    banner_color = (34, 197, 94) if is_match else (50, 50, 240)
+
+    title_str = (
+        f"VERDICT: {verdict.replace('_', ' ')}  |  "
+        f"Composite Score: {composite_score:.3f} (Threshold: {threshold:.3f})"
+    )
+    metrics_str = (
+        f"Best Pair: (Frame A{bi}, Frame B{bj})  |  "
+        f"SIFT Inliers: {best_pair_dict['inlier_count']} ({best_pair_dict['inlier_ratio']*100:.1f}%)  |  "
+        f"Minutiae Match: {best_pair_dict['matched_minutiae_fraction']*100:.1f}%"
+    )
+
+    cv2.putText(banner, title_str, (16, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.58, banner_color, 2, cv2.LINE_AA)
+    cv2.putText(banner, metrics_str, (16, 48), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (220, 220, 220), 1, cv2.LINE_AA)
+
+    composite_vis = np.vstack([banner, match_canvas])
+    vis_filename = f"match_pair_A{bi}_B{bj}_{uuid.uuid4().hex[:8]}.jpg"
+    vis_path = vis_dir / vis_filename
+    cv2.imwrite(str(vis_path), composite_vis)
+
+    visual_url = to_output_url(str(vis_path)) or f"/output/match_visualizations/{vis_filename}"
+
+    return {
+        "best_pair": best_pair_dict,
+        "median_score": round(median_score, 4),
+        "best_score": round(best_score, 4),
+        "composite_score": round(composite_score, 4),
+        "inlier_count": best_pair_dict["inlier_count"],
+        "inlier_ratio": best_pair_dict["inlier_ratio"],
+        "matched_minutiae_fraction": best_pair_dict["matched_minutiae_fraction"],
+        "method_a": {
+            "inlier_count": best_pair_dict["inlier_count"],
+            "inlier_ratio": best_pair_dict["inlier_ratio"],
+            "score": best_pair_dict["score_method_a"],
+        },
+        "method_b": {
+            "matched_count": best_res_b.get("matched_count", 0),
+            "matched_fraction": best_pair_dict["matched_minutiae_fraction"],
+            "score": best_pair_dict["score_method_b"],
+        },
+        "visual_url": visual_url,
+        "pair_scores": pair_scores,
+        "is_match": is_match,
+        "verdict": verdict,
+        "threshold": threshold,
+        "threshold_calibrated": threshold_calibrated,
+    }
+
+
+def match_two_videos_end_to_end(
+    video_a_path: Union[str, Path],
+    video_b_path: Union[str, Path],
+    filter_method: str = "frangi",
+    threshold_method: str = "adaptive",
+    adaptive_block_size: int = 15,
+    adaptive_c: int = 2,
+    exclude_nostrils: bool = True,
+    device: str = "cpu",
+    cpu_cores: int = 6,
+    output_dir: Optional[Union[str, Path]] = None,
+    log_callback: Optional[Any] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    End-to-end cattle video biometric verification:
+    1. Extracts 5 muzzle stage frames from Video A using extract_five_muzzle_stages.
+    2. Extracts 5 muzzle stage frames from Video B using extract_five_muzzle_stages.
+    3. Runs 5x5 All-Pairs Biometric Comparison (SIFT/RANSAC + Minutiae Matching).
+    """
+    from video_groove_extractor import extract_five_muzzle_stages
+
+    out_dir = Path(output_dir) if output_dir else (SCRIPT_DIR / "output")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    if log_callback:
+        log_callback(f"Extracting 5 muzzle stages from Video A: {Path(video_a_path).name}...")
+
+    res_a = extract_five_muzzle_stages(
+        video_path=video_a_path,
+        method=filter_method,
+        threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
+        exclude_nostrils=exclude_nostrils,
+        device=device,
+        cpu_cores=cpu_cores,
+        log_callback=log_callback,
+    )
+
+    if log_callback:
+        log_callback(f"Extracting 5 muzzle stages from Video B: {Path(video_b_path).name}...")
+
+    res_b = extract_five_muzzle_stages(
+        video_path=video_b_path,
+        method=filter_method,
+        threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
+        exclude_nostrils=exclude_nostrils,
+        device=device,
+        cpu_cores=cpu_cores,
+        log_callback=log_callback,
+    )
+
+    frames_a = res_a.get("frames", [])
+    frames_b = res_b.get("frames", [])
+
+    if not frames_a:
+        raise ValueError(f"No muzzle frames could be extracted from Video A: {video_a_path}")
+    if not frames_b:
+        raise ValueError(f"No muzzle frames could be extracted from Video B: {video_b_path}")
+
+    if log_callback:
+        log_callback(f"Executing 5x5 biometric all-pairs SIFT/RANSAC and Minutiae matching...")
+
+    match_result = match_muzzle_frame_sets(
+        frames_a=frames_a,
+        frames_b=frames_b,
+        output_dir=out_dir,
+    )
+
+    match_result["video_a"] = {
+        "name": Path(video_a_path).name,
+        "path": str(video_a_path),
+        "frames": frames_a,
+        "median_parameters": res_a.get("median_parameters", {}),
+        "vector_array": res_a.get("vector_array", []),
+    }
+    match_result["video_b"] = {
+        "name": Path(video_b_path).name,
+        "path": str(video_b_path),
+        "frames": frames_b,
+        "median_parameters": res_b.get("median_parameters", {}),
+        "vector_array": res_b.get("vector_array", []),
+    }
+
+    return match_result
+
+
+def compare_two_frames_biometric(
+    frame_a: Any,
+    frame_b: Any,
+    weight_a: float = 0.65,
+    weight_b: float = 0.35,
+) -> Dict[str, Any]:
+    """
+    Direct biometric comparison between two individual muzzle frames or crops:
+    Method A: SIFT Keypoint & RANSAC Affine Inliers.
+    Method B: Topological Minutiae Points & Bipartite Matching.
+    Composite Score: 0.65 * score_a + 0.35 * score_b.
+    """
+    gray_a, skel_a, mins_a = _resolve_frame_data(frame_a)
+    gray_b, skel_b, mins_b = _resolve_frame_data(frame_b)
+
+    res_a = match_sift_ransac(gray_a, gray_b)
+    res_b = match_minutiae(mins_a, mins_b)
+
+    score_a = float(res_a.get("score_method_a", 0.0))
+    score_b = float(res_b.get("score_method_b", 0.0))
+    composite_score = round(float(weight_a * score_a + weight_b * score_b), 4)
+
+    cfg = load_matcher_config()
+    if cfg.get("calibrated") and cfg.get("threshold") is not None:
+        thresh = float(cfg["threshold"])
+    else:
+        thresh = DEFAULT_MATCH_THRESHOLD
+
+    is_match = bool(composite_score >= thresh)
+
+    return {
+        "sift_inlier_count": int(res_a.get("inlier_count", 0)),
+        "sift_inlier_ratio": round(float(res_a.get("inlier_ratio", 0.0)), 4),
+        "minutiae_match_fraction": round(float(res_b.get("matched_fraction", 0.0)), 4),
+        "composite_score": composite_score,
+        "score_method_a": round(score_a, 4),
+        "score_method_b": round(score_b, 4),
+        "is_match": is_match,
+        "threshold": thresh,
+        "method_a": res_a,
+        "method_b": res_b,
+    }
+
 
 
 def extract_best_muzzles_from_video(

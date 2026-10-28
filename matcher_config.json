@@ -1,0 +1,22 @@
+{
+  "calibrated": true,
+  "calibrated_at": "2026-10-28T17:46:24.620547Z",
+  "threshold": 0.356,
+  "eer": 0.0,
+  "roc_auc": 1.0,
+  "min_sift_inliers": 73,
+  "min_inlier_ratio": 0.775,
+  "min_minutiae_fraction": 0.434,
+  "decision_metric": "composite_score",
+  "summary": {
+    "total_cows": 3,
+    "total_videos": 7,
+    "genuine_pairs_evaluated": 5,
+    "impostor_pairs_evaluated": 16,
+    "within_video_pairs_evaluated": 70,
+    "genuine_mean_score": 0.8307,
+    "impostor_mean_score": 0.238,
+    "tar_at_eer": 1.0,
+    "far_at_eer": 0.0
+  }
+}

@@ -30,6 +30,7 @@ from groove_graph import (
     visualize_groove_graph,
     compute_skeleton_neighbor_degrees,
     cluster_junction_pixels,
+    prune_skeleton,
 )
 from groove_extractor import extract_muzzle_grooves_pipeline
 
@@ -316,3 +317,67 @@ def test_curved_arc_curvature():
     assert b["chord_length"] == pytest.approx(60.0, abs=4.0)
     assert b["curvature"] > 1.4
     assert b["curvature"] < 1.8
+
+
+# -----------------------------------------------------------------------------
+# Test 10: Skeleton Pruning removes short spurs < min_spur_length and small components
+# -----------------------------------------------------------------------------
+def test_prune_skeleton_removes_short_spurs_and_small_components():
+    """Verify prune_skeleton eliminates spurs shorter than min_spur_length and small components."""
+    h, w = 80, 80
+    canvas = np.zeros((h, w), dtype=np.uint8)
+    # Long backbone: length ~51 px
+    cv2.line(canvas, (15, 40), (65, 40), 255, 1)
+    # Short spur: length ~5 px (attached at (40, 40), goes to (40, 35))
+    cv2.line(canvas, (40, 40), (40, 35), 255, 1)
+    # Disconnected small component: length ~12 px
+    cv2.line(canvas, (10, 10), (22, 10), 255, 1)
+
+    skel = (skeletonize(canvas > 0) * 255).astype(np.uint8)
+
+    # Before pruning, graph should have 4 endpoints (2 from backbone, 1 from spur, 2 from small comp)
+    res_raw = extract_skeleton_graph(skel, prune=False)
+    assert res_raw["endpoint_count"] >= 4
+    assert res_raw["junction_count"] >= 1
+
+    # Prune with min_spur_length=8 and min_component_size=30
+    pruned = prune_skeleton(skel, min_spur_length=8, min_component_size=30)
+    res_pruned = extract_skeleton_graph(pruned, prune=False)
+
+    # The spur is gone, the small component is gone -> exactly 2 endpoints, 0 junctions, 1 branch!
+    assert res_pruned["endpoint_count"] == 2
+    assert res_pruned["junction_count"] == 0
+    assert len(res_pruned["branches"]) == 1
+    assert res_pruned["connected_component_count"] == 1
+
+
+# -----------------------------------------------------------------------------
+# Test 11: Minutiae orientation on endpoints and junctions
+# -----------------------------------------------------------------------------
+def test_minutiae_orientation_endpoints_and_junctions():
+    """Verify minutiae nodes have mathematically consistent orientation attributes."""
+    h, w = 80, 80
+    canvas = np.zeros((h, w), dtype=np.uint8)
+    # Horizontal line from (20, 40) to (60, 40)
+    cv2.line(canvas, (20, 40), (60, 40), 255, 1)
+    skel = (skeletonize(canvas > 0) * 255).astype(np.uint8)
+
+    res = extract_skeleton_graph(skel)
+    for n in res["node_list"]:
+        assert "orientation" in n
+        assert isinstance(n["orientation"], float)
+        assert -180.0 <= n["orientation"] <= 180.0
+
+    # Left endpoint should point right (dx > 0, angle ~0 deg)
+    left_node = [n for n in res["node_list"] if n["pos"][0] < 30][0]
+    right_node = [n for n in res["node_list"] if n["pos"][0] > 50][0]
+    assert left_node["orientation"] == pytest.approx(0.0, abs=5.0)
+    # Right endpoint should point left (dx < 0, angle ~180 or -180 deg)
+    assert abs(right_node["orientation"]) == pytest.approx(180.0, abs=5.0)
+
+    # Check NetworkX G nodes also contain orientation
+    G = res["graph"]
+    for nid, d in G.nodes(data=True):
+        assert "orientation" in d
+        assert -180.0 <= d["orientation"] <= 180.0
+

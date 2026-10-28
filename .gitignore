@@ -62,6 +62,8 @@ frontend/dist/
 output/
 uploads/
 weights/
+dataset/cow_*
+*.mp4
 *.h5
 *.log
 *.log.*

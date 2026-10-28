@@ -14,6 +14,8 @@ import math
 import cv2
 import networkx as nx
 import numpy as np
+from skimage.morphology import skeletonize
+
 
 
 # 8-connectivity neighbor offsets: (dy, dx)
@@ -59,9 +61,115 @@ def cluster_junction_pixels(
     return cv2.connectedComponentsWithStats(junc_mask, connectivity=8)
 
 
+def prune_skeleton(
+    groove_skeleton: np.ndarray,
+    min_spur_length: int = 8,
+    min_component_size: int = 30,
+) -> np.ndarray:
+    """
+    Prunes spurs and small connected components from a 1-pixel binary skeleton.
+
+    Parameters:
+        groove_skeleton: 2D or 3D binary skeleton image (0 and 255 or 0 and 1).
+        min_spur_length: Minimum pixel length for a spur branch connected to a junction.
+                         Branches shorter than this connected to junctions are pruned.
+        min_component_size: Minimum number of total 8-connected skeleton pixels.
+                            Components smaller than this are erased.
+
+    Returns:
+        Pruned binary skeleton image as uint8 np.ndarray with values 0 and 255.
+    """
+    if groove_skeleton is None or groove_skeleton.size == 0:
+        return np.zeros((0, 0), dtype=np.uint8) if groove_skeleton is None else np.zeros_like(groove_skeleton, dtype=np.uint8)
+
+    if groove_skeleton.ndim == 3:
+        groove_skeleton = cv2.cvtColor(groove_skeleton, cv2.COLOR_BGR2GRAY)
+
+    skel = (groove_skeleton > 0).astype(np.uint8)
+    if np.count_nonzero(skel) == 0:
+        return (skel * 255).astype(np.uint8)
+
+    # Initial pass: remove small disconnected components below min_component_size
+    if min_component_size > 0:
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
+        for lbl in range(1, num_labels):
+            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
+                skel[labels == lbl] = 0
+
+    if np.count_nonzero(skel) == 0:
+        return (skel * 255).astype(np.uint8)
+
+    # Iterative spur pruning: remove degree-1 endpoints connected to nearest junction with length < min_spur_length
+    H, W = skel.shape
+    max_iter = 50
+
+    for _ in range(max_iter):
+        deg = compute_skeleton_neighbor_degrees(skel)
+        endpoints = np.argwhere((deg == 1) & (skel == 1))
+        junction_mask = (deg >= 3) & (skel == 1)
+
+        if len(endpoints) == 0 or not np.any(junction_mask):
+            break
+
+        to_remove = set()
+        for ey, ex in endpoints:
+            path = [(int(ey), int(ex))]
+            curr = (int(ey), int(ex))
+            prev = None
+            hit_junction = False
+
+            while len(path) <= min_spur_length:
+                nbrs = []
+                for dy, dx in NEIGHBORS_8:
+                    ny, nx = curr[0] + dy, curr[1] + dx
+                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] == 1 and (ny, nx) != prev:
+                        nbrs.append((ny, nx))
+
+                if not nbrs:
+                    break
+
+                junc_nbrs = [n for n in nbrs if junction_mask[n[0], n[1]]]
+                if junc_nbrs:
+                    hit_junction = True
+                    break
+
+                if len(nbrs) > 1:
+                    break
+
+                nxt = nbrs[0]
+                path.append(nxt)
+                prev = curr
+                curr = nxt
+
+            if hit_junction and len(path) < min_spur_length:
+                for p in path:
+                    to_remove.add(p)
+
+        if not to_remove:
+            break
+
+        for py, px in to_remove:
+            skel[py, px] = 0
+
+        # Re-skeletonize to preserve 1-pixel thinness and clean up junction transitions
+        skel = skeletonize(skel > 0).astype(np.uint8)
+
+    # Final pass: remove any components that shrank below min_component_size
+    if min_component_size > 0:
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
+        for lbl in range(1, num_labels):
+            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
+                skel[labels == lbl] = 0
+
+    return (skel * 255).astype(np.uint8)
+
+
 def extract_skeleton_graph(
     groove_skeleton: np.ndarray,
-    mask: Optional[np.ndarray] = None
+    mask: Optional[np.ndarray] = None,
+    min_spur_length: int = 8,
+    min_component_size: int = 30,
+    prune: bool = True,
 ) -> Dict[str, Any]:
     """
     Extracts topological graph representation and global descriptors from a 1-pixel binary skeleton.
@@ -69,11 +177,14 @@ def extract_skeleton_graph(
     Parameters:
         groove_skeleton: 1-pixel binary skeleton image (uint8 0 or 255).
         mask: Optional binary ROI mask (uint8 0 or 255) for accurate density calculation.
+        min_spur_length: Minimum spur length for pruning (default 8).
+        min_component_size: Minimum connected component size for pruning (default 30).
+        prune: Whether to prune spurs and small components before graph extraction (default True).
 
     Returns:
         Dict containing:
           - 'graph': NetworkX simple Graph (G = nx.Graph())
-          - 'nodes': Dict[int, Dict[str, Any]] mapping node_id to node attributes
+          - 'nodes': Dict[int, Dict[str, Any]] mapping node_id to node attributes (including 'orientation')
           - 'node_list': List[Dict[str, Any]]
           - 'branches': List[Dict[str, Any]] extracted branch metadata
           - 'skeleton_pixel_count': Total skeleton pixels
@@ -92,6 +203,13 @@ def extract_skeleton_graph(
           - 'spatial_dispersion': Radius of gyration of skeleton pixels
           - 'descriptors': Dictionary containing all global descriptors
     """
+    if prune and groove_skeleton is not None and groove_skeleton.size > 0:
+        groove_skeleton = prune_skeleton(
+            groove_skeleton,
+            min_spur_length=min_spur_length,
+            min_component_size=min_component_size,
+        )
+
     if groove_skeleton is None or groove_skeleton.size == 0:
         empty_g = nx.Graph()
         empty_desc = {
@@ -410,10 +528,75 @@ def extract_skeleton_graph(
                 "midpoint_norm": (float(mid_x / max(1, W)), float(mid_y / max(1, H))),
             })
 
+    # Minutiae orientation for nodes
+    for nid, ndata in nodes.items():
+        ntype = ndata["type"]
+        pos = ndata["pos"]
+        node_branches = [b for b in branches if b["start_node"] == nid or b["end_node"] == nid]
+
+        if ntype == "endpoint":
+            if node_branches:
+                b = node_branches[0]
+                coords = b["pixel_coords"]
+                if b["start_node"] == nid:
+                    k = min(4, len(coords) - 1)
+                    target_p = coords[k]
+                else:
+                    k = max(0, len(coords) - 1 - min(4, len(coords) - 1))
+                    target_p = coords[k]
+                dx = target_p[1] - pos[0]
+                dy = target_p[0] - pos[1]
+                orient = float(np.degrees(np.arctan2(dy, dx))) if (abs(dx) > 1e-4 or abs(dy) > 1e-4) else 0.0
+            else:
+                orient = 0.0
+            ndata["orientation"] = round(orient, 2)
+
+        elif ntype == "junction":
+            if node_branches:
+                out_angles = []
+                out_lens = []
+                for b in node_branches:
+                    coords = b["pixel_coords"]
+                    if b["start_node"] == nid:
+                        k = min(4, len(coords) - 1)
+                        target_p = coords[k]
+                    else:
+                        k = max(0, len(coords) - 1 - min(4, len(coords) - 1))
+                        target_p = coords[k]
+                    dx = target_p[1] - pos[0]
+                    dy = target_p[0] - pos[1]
+                    if abs(dx) > 1e-4 or abs(dy) > 1e-4:
+                        ang = float(np.degrees(np.arctan2(dy, dx)))
+                        out_angles.append(ang)
+                        out_lens.append(b["arc_length"])
+
+                if len(out_angles) == 3:
+                    min_diff = 999.0
+                    fork_pair = (0, 1)
+                    for i in range(3):
+                        for j in range(i + 1, 3):
+                            diff = abs((out_angles[i] - out_angles[j] + 180.0) % 360.0 - 180.0)
+                            if diff < min_diff:
+                                min_diff = diff
+                                fork_pair = (i, j)
+                    trunk_idx = [idx for idx in range(3) if idx not in fork_pair][0]
+                    orient = out_angles[trunk_idx]
+                elif out_angles:
+                    best_idx = int(np.argmax(out_lens))
+                    orient = out_angles[best_idx]
+                else:
+                    orient = 0.0
+            else:
+                orient = 0.0
+            ndata["orientation"] = round(orient, 2)
+
+        else:
+            ndata["orientation"] = 0.0
+
     # 6. Build NetworkX Graph G
     G = nx.Graph()
     for nid, ndata in nodes.items():
-        G.add_node(nid, pos=ndata["pos"], type=ndata["type"])
+        G.add_node(nid, pos=ndata["pos"], type=ndata["type"], orientation=ndata["orientation"])
 
     for b in branches:
         u, v = b["start_node"], b["end_node"]

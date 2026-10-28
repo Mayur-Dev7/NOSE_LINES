@@ -31,7 +31,7 @@ from groove_extractor import (
     skeletonize_grooves,
     isolate_muzzle_region,
 )
-from groove_graph import extract_skeleton_graph, visualize_groove_graph
+from groove_graph import extract_skeleton_graph, visualize_groove_graph, prune_skeleton
 
 OUTPUT_BASE = PROJECT_ROOT / "output" / "video_five_frames"
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
@@ -161,7 +161,122 @@ def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> Dict[st
     }
 
 
-def extract_five_frames_groove_features(
+def align_muzzle_canonical(
+    image_bgr: np.ndarray,
+    mask: Optional[np.ndarray] = None,
+    target_size: Tuple[int, int] = (448, 448),
+) -> Tuple[np.ndarray, Optional[np.ndarray], float]:
+    """
+    Canonically aligns a cropped cattle muzzle image and optional mask to an upright orientation.
+
+    Orientation detection strategy:
+      1. Primary: Detect two nostril landmarks (dark regions in the upper 40% of the crop).
+         If two nostril centroids are identified (one left, one right), compute the angle
+         between them and the horizontal, and rotate so nostrils are level.
+      2. Fallback: Compute the mask's principal axis using image central moments
+         (angle = 0.5 * atan2(2 * mu11, mu20 - mu02)) to orient symmetrically along the upright axis.
+      3. Fallback 2: If neither works, angle is 0.0.
+
+    Transforms:
+      - Rotates via cv2.warpAffine with BORDER_REFLECT for image and BORDER_CONSTANT for mask.
+      - Resizes to target_size (default 448x448) using cv2.INTER_LANCZOS4 for image and cv2.INTER_NEAREST for mask.
+
+    Returns:
+        (aligned_bgr, aligned_mask, angle_deg)
+    """
+    if image_bgr is None or image_bgr.size == 0:
+        empty_bgr = np.zeros((*target_size, 3), dtype=np.uint8)
+        empty_mask = np.zeros(target_size, dtype=np.uint8) if mask is not None else None
+        return empty_bgr, empty_mask, 0.0
+
+    h, w = image_bgr.shape[:2]
+    angle_deg = 0.0
+    detected_nostrils = False
+
+    # 1. Primary: Nostril Landmark Detection in upper 40%
+    upper_h = max(1, int(h * 0.40))
+    upper_roi = image_bgr[:upper_h, :]
+    upper_mask = mask[:upper_h, :] if (mask is not None and mask.shape[0] >= upper_h and mask.shape[1] >= w) else None
+
+    gray = cv2.cvtColor(upper_roi, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    if upper_mask is not None and np.count_nonzero(upper_mask) > 0:
+        blurred = np.where(upper_mask > 0, blurred, 255)
+
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    thresh = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel)
+
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    roi_area = float(upper_h * w)
+    min_area = max(15.0, roi_area * 0.003)
+    max_area = roi_area * 0.35
+
+    cands = []
+    for c in contours:
+        area = cv2.contourArea(c)
+        if min_area <= area <= max_area:
+            M = cv2.moments(c)
+            if M["m00"] > 0:
+                cx = float(M["m10"] / M["m00"])
+                cy = float(M["m01"] / M["m00"])
+                cands.append({"area": area, "cx": cx, "cy": cy})
+
+    left_cands = [c for c in cands if c["cx"] < w * 0.55]
+    right_cands = [c for c in cands if c["cx"] > w * 0.45]
+
+    if left_cands and right_cands:
+        best_left = max(left_cands, key=lambda c: c["area"])
+        best_right = max(right_cands, key=lambda c: c["area"])
+        dx = best_right["cx"] - best_left["cx"]
+        dy = best_right["cy"] - best_left["cy"]
+        if dx >= w * 0.15 and abs(dy) < upper_h * 0.6:
+            raw_angle = float(np.degrees(np.arctan2(dy, dx)))
+            if -45.0 <= raw_angle <= 45.0:
+                angle_deg = raw_angle
+                detected_nostrils = True
+
+    # 2. Fallback: Principal Axis of Mask using central moments
+    if not detected_nostrils:
+        if mask is not None and np.count_nonzero(mask) > 50:
+            M = cv2.moments(mask.astype(np.uint8))
+            mu20, mu02, mu11 = M["mu20"], M["mu02"], M["mu11"]
+            if abs(mu20 - mu02) > 1e-4 or abs(mu11) > 1e-4:
+                raw_deg = float(np.degrees(0.5 * math.atan2(2.0 * mu11, mu20 - mu02)))
+                # Symmetrically orient along nearest vertical / upright axis in [-45, 45]
+                angle_deg = float(((raw_deg + 45.0) % 90.0) - 45.0)
+
+    # 3. Rotate to upright orientation and resize to target_size
+    center = (w / 2.0, h / 2.0)
+    rot_mat = cv2.getRotationMatrix2D(center, angle_deg, 1.0)
+    aligned_bgr = cv2.warpAffine(
+        image_bgr,
+        rot_mat,
+        (w, h),
+        flags=cv2.INTER_LANCZOS4,
+        borderMode=cv2.BORDER_REFLECT,
+    )
+
+    aligned_mask = None
+    if mask is not None:
+        aligned_mask = cv2.warpAffine(
+            mask,
+            rot_mat,
+            (w, h),
+            flags=cv2.INTER_NEAREST,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+
+    if (aligned_bgr.shape[1], aligned_bgr.shape[0]) != target_size:
+        aligned_bgr = cv2.resize(aligned_bgr, target_size, interpolation=cv2.INTER_LANCZOS4)
+    if aligned_mask is not None and (aligned_mask.shape[1], aligned_mask.shape[0]) != target_size:
+        aligned_mask = cv2.resize(aligned_mask, target_size, interpolation=cv2.INTER_NEAREST)
+
+    return aligned_bgr, aligned_mask, round(float(angle_deg), 2)
+
+
+def extract_five_muzzle_stages(
     video_path: Union[str, Path],
     method: str = "frangi",                     # 'frangi' (Frangi Hessian) or 'blackhat'
     threshold_method: str = "adaptive",         # 'adaptive' (Adaptive Gaussian) or 'otsu' (Standard)
@@ -172,18 +287,22 @@ def extract_five_frames_groove_features(
     device: str = "cpu",
     cpu_cores: int = 6,
     log_callback: Optional[Any] = None,
+    min_spur_length: int = 8,
+    min_component_size: int = 30,
 ) -> Dict[str, Any]:
     """
-    Genuine end-to-end extraction:
-    1. Loads Mask R-CNN detector with weights (crop11dec.h5).
-    2. Samples frames from video and detects cow muzzle crops with Mask R-CNN.
-    3. Selects 5 distinct, high-quality muzzle detections across the video duration.
-    4. Applies 2x Lanczos-4 upscaling + Grayscale + CLAHE ridge enhancement on each.
-    5. Applies Frangi Hessian or Black-Hat filtering.
-    6. Applies Adaptive Gaussian or Standard Otsu thresholding.
-    7. Computes 1-pixel thin skeleton (the 5th image).
-    8. Calculates the 10 minutiae parameters from the skeleton lines and coordinates.
-    9. Saves all 5 stage images per frame and returns vectors and URLs.
+    Genuine end-to-end extraction with quality gating and canonical alignment:
+    1. Loads singleton Mask R-CNN detector with weights (crop11dec.h5).
+    2. Samples ~30 candidate frames evenly distributed across video duration.
+    3. Evaluates motion blur (Laplacian variance) and detects muzzle with Mask R-CNN.
+    4. Applies quality gating: rejects low-conf (<0.70), blurred (<25.0), and partial muzzles.
+    5. Scores valid candidates and selects top 5 temporally spread-out frames.
+    6. Canonically aligns each crop (nostril leveling / moment symmetry) to 448x448.
+    7. Applies CLAHE ridge enhancement on aligned crop.
+    8. Applies Frangi Hessian or Black-Hat filtering + Adaptive/Otsu thresholding.
+    9. Generates 1-pixel thin skeleton and prunes spurious branches / noise components.
+    10. Calculates the 10 minutiae parameters and minutiae point list (x, y, type, orientation).
+    11. Saves all 5 stage images per frame and returns vectors and URLs.
     """
     def log(msg: str):
         logger.info(msg)
@@ -207,7 +326,7 @@ def extract_five_frames_groove_features(
     # Step 1: Initialize Mask R-CNN Model
     cropper = get_detector_pipeline(device=device, cpu_cores=cpu_cores)
 
-    # Step 2: Open video and calculate temporal distribution
+    # Step 2: Open video and calculate temporal candidate frames
     cap = cv2.VideoCapture(str(v_path))
     if not cap.isOpened():
         raise RuntimeError(f"Unable to open video: {v_path}")
@@ -217,87 +336,162 @@ def extract_five_frames_groove_features(
     duration_sec = total_frames / max(1.0, fps)
     log(f"Video duration: {duration_sec:.1f}s ({total_frames} total frames, {fps:.1f} FPS)")
 
-    # 5 temporal regions across video: 10%, 30%, 50%, 70%, 90%
-    target_fractions = [0.10, 0.30, 0.50, 0.70, 0.90]
-    target_indices = [max(0, min(total_frames - 1, int(total_frames * f))) for f in target_fractions]
+    if total_frames <= 0:
+        cap.release()
+        raise RuntimeError(f"Video contains 0 frames: {v_path}")
 
-    detected_candidates = []
+    # Sample ~30 candidate frames evenly distributed across video duration
+    num_samples = min(30, total_frames)
+    candidate_indices = np.linspace(0, total_frames - 1, num_samples, dtype=int).tolist()
+    candidate_indices = sorted(list(dict.fromkeys(candidate_indices)))
+    log(f"Sampling {len(candidate_indices)} candidate frames across video duration for quality gating...")
 
-    for seg_idx, center_idx in enumerate(target_indices):
-        log(f"[Stage 1/5] Searching muzzle detection for slot {seg_idx + 1}/5 near frame #{center_idx}...")
-        found_in_slot = None
-        # Try center frame, then search nearby frames in increments of 5
-        offsets = [0, 5, -5, 10, -10, 15, -15, 20, -20]
-        for off in offsets:
-            f_idx = max(0, min(total_frames - 1, center_idx + off))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-            ret, frame_bgr = cap.read()
-            if not ret or frame_bgr is None:
-                continue
+    all_candidates: List[Dict[str, Any]] = []
 
-            # Quick blur variance check
-            gray_small = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-            blur_var = float(cv2.Laplacian(gray_small, cv2.CV_64F).var())
-            if blur_var < 20.0 and off != 0:
-                continue
+    for f_idx in candidate_indices:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
+        ret, frame_bgr = cap.read()
+        if not ret or frame_bgr is None:
+            continue
 
-            # Run real Mask R-CNN detector
-            det_res = cropper.process_image(frame_bgr, make_square=True, target_size=None)
-            detections = det_res.get("detections", [])
-            if detections:
-                best_det = max(detections, key=lambda d: d["confidence"])
-                if best_det["confidence"] >= 0.70:
-                    y1, x1, y2, x2 = best_det["bbox_cropped"]
-                    native_crop = frame_bgr[y1:y2, x1:x2].copy() if (y2 > y1 and x2 > x1) else best_det["cropped_bgr"]
-                    
-                    full_mask = best_det.get("mask")
-                    crop_mask = None
-                    if full_mask is not None and full_mask.shape[0] >= y2 and full_mask.shape[1] >= x2:
-                        raw_patch = full_mask[y1:y2, x1:x2].astype(np.uint8) * 255
-                        crop_mask = raw_patch
+        orig_h, orig_w = frame_bgr.shape[:2]
 
-                    found_in_slot = {
-                        "frame_idx": f_idx,
-                        "timestamp_sec": round(float(f_idx / fps), 2),
-                        "confidence": float(best_det["confidence"]),
-                        "native_crop": native_crop,
-                        "crop_mask": crop_mask,
-                        "bbox": best_det["bbox_cropped"],
-                    }
-                    log(f" -> Slot {seg_idx + 1}/5: Detected muzzle at frame #{f_idx} (Confidence: {best_det['confidence']*100:.1f}%)")
-                    break
+        # Motion blur check (Laplacian variance)
+        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-        if found_in_slot:
-            detected_candidates.append(found_in_slot)
-        else:
-            log(f" -> Slot {seg_idx + 1}/5: No muzzle passed threshold, extracting center frame fallback")
-            cap.set(cv2.CAP_PROP_POS_FRAMES, center_idx)
-            ret, frame_bgr = cap.read()
-            if ret and frame_bgr is not None:
-                h, w = frame_bgr.shape[:2]
-                cy1, cy2 = int(h * 0.25), int(h * 0.85)
-                cx1, cx2 = int(w * 0.15), int(w * 0.85)
-                crop = frame_bgr[cy1:cy2, cx1:cx2].copy()
-                detected_candidates.append({
-                    "frame_idx": center_idx,
-                    "timestamp_sec": round(float(center_idx / fps), 2),
-                    "confidence": 0.80,
-                    "native_crop": crop,
-                    "crop_mask": None,
-                    "bbox": [cy1, cx1, cy2, cx2],
-                })
+        # Run Mask R-CNN detector
+        det_res = cropper.process_image(frame_bgr, make_square=True, target_size=None)
+        detections = det_res.get("detections", [])
+
+        if not detections:
+            cy1, cy2 = int(orig_h * 0.25), int(orig_h * 0.85)
+            cx1, cx2 = int(orig_w * 0.15), int(orig_w * 0.85)
+            crop = frame_bgr[cy1:cy2, cx1:cx2].copy()
+            score = min(100.0, lap_var / 5.0)
+            all_candidates.append({
+                "frame_idx": f_idx,
+                "timestamp_sec": round(float(f_idx / fps), 2),
+                "confidence": 0.0,
+                "laplacian_var": lap_var,
+                "score": score,
+                "passed_gating": False,
+                "rejection_reasons": ["no_detection"],
+                "native_crop": crop,
+                "crop_mask": None,
+                "bbox": [cy1, cx1, cy2, cx2],
+            })
+            continue
+
+        best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
+        conf = float(best_det.get("confidence", 0.0))
+
+        # Quality gating checks:
+        # 1. Low confidence (< 0.70)
+        # 2. Motion blur (< 25.0)
+        # 3. Partial muzzle (bbox margin < 5px if large, or mask area / bbox area < 0.25)
+        passed_gating = True
+        reasons = []
+
+        if conf < 0.70:
+            passed_gating = False
+            reasons.append(f"low_conf={conf:.2f}")
+
+        if lap_var < 25.0:
+            passed_gating = False
+            reasons.append(f"blurred={lap_var:.1f}")
+
+        bbox = best_det.get("bbox_original") or best_det.get("bbox_cropped")
+        if bbox is not None and len(bbox) == 4:
+            y1, x1, y2, x2 = bbox
+            if orig_h >= 100 and orig_w >= 100:
+                margin = 5
+                if y1 < margin or x1 < margin or (orig_h - y2) < margin or (orig_w - x2) < margin:
+                    passed_gating = False
+                    reasons.append("boundary_margin")
+
+            bbox_area = max(1, (y2 - y1) * (x2 - x1))
+            full_mask = best_det.get("mask")
+            if full_mask is not None and full_mask.size > 0:
+                m_patch = full_mask[max(0, y1):min(orig_h, y2), max(0, x1):min(orig_w, x2)]
+                mask_area = float(np.count_nonzero(m_patch))
+                mask_ratio = mask_area / float(bbox_area)
+                if mask_ratio < 0.25:
+                    passed_gating = False
+                    reasons.append(f"low_mask_ratio={mask_ratio:.2f}")
+
+        score = (conf * 100.0) + min(100.0, lap_var / 5.0)
+
+        y1_c, x1_c, y2_c, x2_c = best_det.get("bbox_cropped", [0, 0, orig_h, orig_w])
+        native_crop = frame_bgr[y1_c:y2_c, x1_c:x2_c].copy() if (y2_c > y1_c and x2_c > x1_c) else best_det.get("cropped_bgr", frame_bgr)
+        full_mask = best_det.get("mask")
+        crop_mask = None
+        if full_mask is not None and full_mask.shape[0] >= y2_c and full_mask.shape[1] >= x2_c:
+            crop_mask = (full_mask[y1_c:y2_c, x1_c:x2_c].astype(np.uint8) * 255) if (y2_c > y1_c and x2_c > x1_c) else None
+
+        all_candidates.append({
+            "frame_idx": f_idx,
+            "timestamp_sec": round(float(f_idx / fps), 2),
+            "confidence": conf,
+            "laplacian_var": lap_var,
+            "score": score,
+            "passed_gating": passed_gating,
+            "rejection_reasons": reasons,
+            "native_crop": native_crop,
+            "crop_mask": crop_mask,
+            "bbox": [y1_c, x1_c, y2_c, x2_c],
+        })
 
     cap.release()
 
-    # Step 3: Process the 5 frames through 2x Lanczos-4, CLAHE grayscale, groove filter, threshold, and skeletonization
+    # Step 3: Select top 5 highest-scoring distinct frames across video with temporal spread
+    valid_candidates = [c for c in all_candidates if c["passed_gating"]]
+    valid_candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    fallback_candidates = [c for c in all_candidates if not c["passed_gating"]]
+    fallback_candidates.sort(key=lambda c: c["score"], reverse=True)
+
+    selected: List[Dict[str, Any]] = []
+
+    def try_select(pool: List[Dict[str, Any]], min_sep: int, current: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        res = list(current)
+        for cand in pool:
+            if len(res) >= 5:
+                break
+            if all(abs(cand["frame_idx"] - s["frame_idx"]) >= min_sep for s in res):
+                res.append(cand)
+        return res
+
+    # Attempt to pick with separation 15, then 10, then 5, then 1 from valid candidates
+    for sep in (15, 10, 5, 1):
+        selected = try_select(valid_candidates, sep, selected)
+        if len(selected) >= 5:
+            break
+
+    # Gracefully fall back to best available candidate frames if fewer than 5 passed gating
+    if len(selected) < 5:
+        log(f"Only {len(selected)} valid frames passed strict gating; gracefully falling back to best available candidate frames.")
+        for sep in (15, 10, 5, 1):
+            selected = try_select(fallback_candidates, sep, selected)
+            if len(selected) >= 5:
+                break
+
+    # Sort selected frames chronologically
+    selected.sort(key=lambda c: c["frame_idx"])
+    detected_candidates = selected[:5]
+
+    log(f"Selected {len(detected_candidates)} frames for groove extraction: {[c['frame_idx'] for c in detected_candidates]}")
+
+    # Step 4: Process the 5 frames through canonical alignment, 2x Lanczos-4, CLAHE grayscale, groove filter, threshold, and skeleton pruning
     frames_records = []
     param_lists: Dict[str, List[float]] = {k: [] for k in FEATURE_KEYS}
 
-    for i, candidate in enumerate(detected_candidates[:5]):
+    for i, candidate in enumerate(detected_candidates):
         f_idx = candidate["frame_idx"]
         native_bgr = candidate["native_crop"]
         crop_mask = candidate["crop_mask"]
         conf = candidate["confidence"]
+        lap_var = candidate.get("laplacian_var", 0.0)
 
         log(f"[Frame {i + 1}/5] Processing muzzle from frame #{f_idx} (native size {native_bgr.shape[1]}x{native_bgr.shape[0]})...")
 
@@ -305,31 +499,25 @@ def extract_five_frames_groove_features(
         p_crop = cache_dir / f"frame_{i}_01_native_crop.jpg"
         cv2.imwrite(str(p_crop), native_bgr)
 
-        # 2. Stage 2: 2x Super-Resolution Upscaling with Lanczos-4 & CLAHE Grayscale
-        # Target standard 448x448 evaluation canvas
-        upscaled_bgr = cv2.resize(native_bgr, (448, 448), interpolation=cv2.INTER_LANCZOS4)
-        gray_up = cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2GRAY)
+        # 2. Canonical alignment & 2x Lanczos-4 target sizing (448x448)
+        aligned_bgr, aligned_mask, angle_deg = align_muzzle_canonical(
+            native_bgr, mask=crop_mask, target_size=(448, 448)
+        )
+        upscaled_bgr = aligned_bgr
+        mask_up = aligned_mask
 
-        # Unsharp masking
+        # Grayscale & CLAHE local contrast normalization on canonical aligned crop
+        gray_up = cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray_up, (0, 0), sigmaX=1.5, sigmaY=1.5)
         gray_unsharp = cv2.addWeighted(gray_up, 1.5, blurred, -0.5, 0)
-
-        # CLAHE local contrast normalization
         clahe_filter = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
         enhanced_gray = clahe_filter.apply(gray_unsharp)
 
         p_enh = cache_dir / f"frame_{i}_02_enhanced_ridge.jpg"
         cv2.imwrite(str(p_enh), enhanced_gray)
 
-        # Upscale mask if available
-        mask_up = None
-        if crop_mask is not None and crop_mask.size > 0:
-            mask_up = cv2.resize(crop_mask, (448, 448), interpolation=cv2.INTER_NEAREST)
-
         # 3. Stage 3 & 4: Groove Response & Thresholding
-        # Convert enhanced grayscale back to 3-channel for pipeline input
         enh_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
-
         groove_res = extract_muzzle_grooves_pipeline(
             image_bgr=enh_bgr,
             mask=mask_up,
@@ -343,10 +531,21 @@ def extract_five_frames_groove_features(
 
         groove_response = groove_res["enhanced_response"]
         groove_mask = groove_res["groove_mask"]
-        groove_skeleton = groove_res["groove_skeleton"]  # 5th Image (1-px Thin Skeleton Lines)
+        raw_skeleton = groove_res["groove_skeleton"]
+
+        # Prune skeleton (Task 3)
+        pruned_skeleton = prune_skeleton(
+            raw_skeleton,
+            min_spur_length=min_spur_length,
+            min_component_size=min_component_size,
+        )
 
         # 4. Stage 5: Line Coordinates & Minutiae Parameters Extraction
-        graph_res = extract_skeleton_graph(groove_skeleton, mask=groove_res.get("mask"))
+        graph_res = extract_skeleton_graph(
+            pruned_skeleton,
+            mask=groove_res.get("mask"),
+            prune=False,  # Already pruned
+        )
         desc = graph_res["descriptors"]
 
         # 5. Visual Colored Groove Overlay
@@ -360,10 +559,10 @@ def extract_five_frames_groove_features(
 
         cv2.imwrite(str(p_resp), groove_response)
         cv2.imwrite(str(p_mask), groove_mask)
-        cv2.imwrite(str(p_skel), groove_skeleton)
+        cv2.imwrite(str(p_skel), pruned_skeleton)
         cv2.imwrite(str(p_over), overlay)
 
-        # Assemble the 10 numerical minutiae parameters from the 5th image lines
+        # Assemble the 10 numerical minutiae parameters from the pruned skeleton
         params = {
             "groove_pixels": int(groove_res["num_groove_pixels"]),
             "skeleton_pixels": int(desc["skeleton_pixel_count"]),
@@ -377,6 +576,16 @@ def extract_five_frames_groove_features(
             "euler_characteristic": int(desc["euler_characteristic"]),
         }
 
+        minutiae = [
+            {
+                "x": float(n["pos"][0]),
+                "y": float(n["pos"][1]),
+                "type": n["type"],
+                "orientation": float(n.get("orientation", 0.0)),
+            }
+            for n in graph_res["node_list"]
+        ]
+
         for k in FEATURE_KEYS:
             param_lists[k].append(params[k])
 
@@ -386,15 +595,24 @@ def extract_five_frames_groove_features(
             "frame_idx": f_idx,
             "timestamp_sec": candidate["timestamp_sec"],
             "confidence": round(float(conf), 3),
+            "laplacian_var": round(float(lap_var), 2),
+            "canonical_angle_deg": round(float(angle_deg), 2),
             "crop_url": f"{rel_base}/frame_{i}_01_native_crop.jpg",
             "enhanced_url": f"{rel_base}/frame_{i}_02_enhanced_ridge.jpg",
             "groove_response_url": f"{rel_base}/frame_{i}_03_groove_response.png",
             "groove_mask_url": f"{rel_base}/frame_{i}_04_groove_mask.png",
             "skeleton_url": f"{rel_base}/frame_{i}_05_thin_skeleton.png",
             "overlay_url": f"{rel_base}/frame_{i}_overlay.png",
+            "crop_path": str(p_crop),
+            "enhanced_path": str(p_enh),
+            "groove_response_path": str(p_resp),
+            "groove_mask_path": str(p_mask),
+            "skeleton_path": str(p_skel),
+            "overlay_path": str(p_over),
             "parameters": params,
+            "minutiae": minutiae,
         })
-        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops")
+        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae")
 
     # Aggregate median parameter vector across the 5 frames
     median_params: Dict[str, float] = {}
@@ -430,3 +648,7 @@ def extract_five_frames_groove_features(
 
     log(f"Completed 5-frame groove parameter extraction for {v_path.name} successfully.")
     return result
+
+
+extract_five_frames_groove_features = extract_five_muzzle_stages
+

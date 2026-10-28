@@ -53,6 +53,13 @@ from video_groove_extractor import (
     extract_five_frames_groove_features,
     compute_cosine_similarity,
 )
+from muzzle_matcher import (
+    match_sift_ransac,
+    match_minutiae,
+    match_muzzle_frame_sets,
+    match_two_videos_end_to_end,
+    load_matcher_config,
+)
 WEIGHTS_PATH = Path("/home/adis_mayur/F_CODES/crop11dec.h5")
 PYTHON_EXEC = BASE_DIR / ".venv" / "bin" / "python"
 CROPPER_SCRIPT = BASE_DIR / "muzzle_cropper.py"
@@ -1024,6 +1031,93 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
         return res
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Cosine similarity calculation failed: {str(e)}")
+
+
+class VideoMatchRequest(BaseModel):
+    video_a_path: Optional[str] = None
+    video_b_path: Optional[str] = None
+    filter_method: Optional[str] = "frangi"
+    threshold_method: Optional[str] = "adaptive"
+    adaptive_block_size: Optional[int] = 15
+    adaptive_c: Optional[int] = 2
+    exclude_nostrils: Optional[bool] = True
+    min_spur_length: Optional[int] = 8
+    min_component_size: Optional[int] = 30
+    frames_a: Optional[List[Any]] = None
+    frames_b: Optional[List[Any]] = None
+    cache_id_a: Optional[str] = None
+    cache_id_b: Optional[str] = None
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
+
+
+@app.get("/api/video/matcher-config")
+async def get_matcher_config_endpoint():
+    """
+    Reads matcher_config.json if it exists.
+    If not found or uncalibrated, returns {"calibrated": False, "status": "UNCALIBRATED", "threshold": None}.
+    """
+    return load_matcher_config()
+
+
+@app.post("/api/video/match")
+async def match_video_endpoint(req: VideoMatchRequest):
+    """
+    Executes SIFT/RANSAC Keypoint Matching and Minutiae Matching across cattle muzzle frame sets or videos.
+    Checks matcher_config.json for calibrated threshold, formats response, and returns JSON.
+    """
+    loop = asyncio.get_event_loop()
+    from functools import partial
+
+    # Option 1: Direct matching on pre-extracted frame data
+    if req.frames_a and req.frames_b:
+        try:
+            fn = partial(
+                match_muzzle_frame_sets,
+                frames_a=req.frames_a,
+                frames_b=req.frames_b,
+                output_dir=OUTPUT_DIR,
+            )
+            res = await loop.run_in_executor(None, fn)
+            return res
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Frame set matching failed: {str(e)}")
+
+    # Option 2: Full end-to-end matching from two video files
+    if req.video_a_path and req.video_b_path:
+        va = resolve_video_path(req.video_a_path)
+        vb = resolve_video_path(req.video_b_path)
+        if not va or not va.exists():
+            raise HTTPException(status_code=404, detail=f"Video A not found: {req.video_a_path}")
+        if not vb or not vb.exists():
+            raise HTTPException(status_code=404, detail=f"Video B not found: {req.video_b_path}")
+
+        fn = partial(
+            match_two_videos_end_to_end,
+            video_a_path=str(va),
+            video_b_path=str(vb),
+            filter_method=req.filter_method or "frangi",
+            threshold_method=req.threshold_method or "adaptive",
+            adaptive_block_size=int(req.adaptive_block_size or 15),
+            adaptive_c=int(req.adaptive_c or 2),
+            exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+            device=req.device or "cpu",
+            cpu_cores=int(req.cpu_cores or 6),
+            output_dir=OUTPUT_DIR,
+        )
+
+        try:
+            async with _EXTRACTION_LOCK:
+                res = await loop.run_in_executor(None, fn)
+                return res
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Video matching failed: {str(e)}")
+
+    raise HTTPException(
+        status_code=400,
+        detail="Either (video_a_path and video_b_path) or (frames_a and frames_b) must be provided.",
+    )
+
 
 
 # Static file serving
