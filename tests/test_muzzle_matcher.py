@@ -58,9 +58,8 @@ def test_canonical_align_uses_small_local_nostrils_and_recovers_tilt():
     aligned, aligned_mask, meta = canonical_align_muzzle(image, mask, 448)
     assert aligned.shape == (448, 448, 3)
     assert aligned_mask.shape == (448, 448)
-    assert meta["alignment_method"] in {"local_nostril_contrast", "mask_principal_axis"}
-    if meta["alignment_method"] == "local_nostril_contrast":
-        assert abs(meta["rotation_deg"]) == pytest.approx(15, abs=5)
+    assert meta["alignment_method"] == "local_nostril_contrast"
+    assert abs(meta["rotation_deg"]) == pytest.approx(15, abs=5)
 
 
 def _frames(image, skeleton):
