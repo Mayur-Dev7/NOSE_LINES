@@ -66,103 +66,104 @@ def prune_skeleton(
     min_spur_length: int = 8,
     min_component_size: int = 30,
 ) -> np.ndarray:
-    """
-    Prunes spurs and small connected components from a 1-pixel binary skeleton.
-
-    Parameters:
-        groove_skeleton: 2D or 3D binary skeleton image (0 and 255 or 0 and 1).
-        min_spur_length: Minimum pixel length for a spur branch connected to a junction.
-                         Branches shorter than this connected to junctions are pruned.
-        min_component_size: Minimum number of total 8-connected skeleton pixels.
-                            Components smaller than this are erased.
-
-    Returns:
-        Pruned binary skeleton image as uint8 np.ndarray with values 0 and 255.
-    """
+    """Remove small components and short endpoint branches; return uint8 values {0,255}."""
     if groove_skeleton is None or groove_skeleton.size == 0:
         return np.zeros((0, 0), dtype=np.uint8) if groove_skeleton is None else np.zeros_like(groove_skeleton, dtype=np.uint8)
-
     if groove_skeleton.ndim == 3:
         groove_skeleton = cv2.cvtColor(groove_skeleton, cv2.COLOR_BGR2GRAY)
-
     skel = (groove_skeleton > 0).astype(np.uint8)
-    if np.count_nonzero(skel) == 0:
+    if not np.any(skel):
         return (skel * 255).astype(np.uint8)
 
-    # Initial pass: remove small disconnected components below min_component_size
-    if min_component_size > 0:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
-        for lbl in range(1, num_labels):
-            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
-                skel[labels == lbl] = 0
+    def remove_small_components(binary):
+        if min_component_size <= 0:
+            return binary
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        for label in range(1, count):
+            if stats[label, cv2.CC_STAT_AREA] < min_component_size:
+                binary[labels == label] = 0
+        return binary
 
-    if np.count_nonzero(skel) == 0:
-        return (skel * 255).astype(np.uint8)
-
-    # Iterative spur pruning: remove degree-1 endpoints connected to nearest junction with length < min_spur_length
+    skel = remove_small_components(skel)
     H, W = skel.shape
-    max_iter = 50
-
-    for _ in range(max_iter):
+    # Prune one endpoint branch at a time. The walk stops as soon as the current
+    # path reaches a junction (including a junction neighbour), avoiding trunk nubs.
+    for _ in range(max(H, W)):
         deg = compute_skeleton_neighbor_degrees(skel)
-        endpoints = np.argwhere((deg == 1) & (skel == 1))
-        junction_mask = (deg >= 3) & (skel == 1)
-
-        if len(endpoints) == 0 or not np.any(junction_mask):
+        endpoints = np.argwhere((skel > 0) & (deg == 1))
+        if len(endpoints) == 0:
             break
-
-        to_remove = set()
+        removed_any = False
+        junction_mask = (skel > 0) & (deg >= 3)
         for ey, ex in endpoints:
             path = [(int(ey), int(ex))]
-            curr = (int(ey), int(ex))
             prev = None
-            hit_junction = False
-
-            while len(path) <= min_spur_length:
-                nbrs = []
+            curr = (int(ey), int(ex))
+            reached_junction = False
+            while True:
+                if junction_mask[curr]:
+                    reached_junction = True
+                    break
+                neighbours = []
                 for dy, dx in NEIGHBORS_8:
                     ny, nx = curr[0] + dy, curr[1] + dx
-                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] == 1 and (ny, nx) != prev:
-                        nbrs.append((ny, nx))
-
-                if not nbrs:
+                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] and (ny, nx) != prev:
+                        neighbours.append((ny, nx))
+                junction_neighbours = [pt for pt in neighbours if junction_mask[pt]]
+                if junction_neighbours:
+                    reached_junction = True
                     break
-
-                junc_nbrs = [n for n in nbrs if junction_mask[n[0], n[1]]]
-                if junc_nbrs:
-                    hit_junction = True
+                if len(neighbours) != 1:
                     break
-
-                if len(nbrs) > 1:
-                    break
-
-                nxt = nbrs[0]
+                nxt = neighbours[0]
                 path.append(nxt)
-                prev = curr
-                curr = nxt
-
-            if hit_junction and len(path) < min_spur_length:
-                for p in path:
-                    to_remove.add(p)
-
-        if not to_remove:
+                prev, curr = curr, nxt
+                if len(path) > int(min_spur_length):
+                    break
+            if reached_junction and len(path) <= int(min_spur_length):
+                for py, px in path:
+                    skel[py, px] = 0
+                removed_any = True
+        if not removed_any:
             break
-
-        for py, px in to_remove:
-            skel[py, px] = 0
-
-        # Re-skeletonize to preserve 1-pixel thinness and clean up junction transitions
-        skel = skeletonize(skel > 0).astype(np.uint8)
-
-    # Final pass: remove any components that shrank below min_component_size
-    if min_component_size > 0:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
-        for lbl in range(1, num_labels):
-            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
-                skel[labels == lbl] = 0
-
+        skel = remove_small_components(skel)
     return (skel * 255).astype(np.uint8)
 
+
+def extract_minutiae_points(skel, max_points=250):
+    """Extract endpoint/junction minutiae ranked by their longest incident branch.
+
+    The API intentionally returns x, y, type, angle and weight as required by
+    the spatial matcher. This helper is separate from legacy graph records.
+    """
+    if skel is None or skel.size == 0:
+        return []
+    binary = (np.asarray(skel) > 0).astype(np.uint8)
+    if binary.ndim == 3:
+        binary = cv2.cvtColor(binary, cv2.COLOR_BGR2GRAY)
+        binary = (binary > 0).astype(np.uint8)
+    degrees = compute_skeleton_neighbor_degrees(binary)
+    nodes_yx = np.argwhere((binary > 0) & ((degrees == 1) | (degrees >= 3)))
+    if not len(nodes_yx):
+        return []
+    H, W = binary.shape
+    records = []
+    for y, x in nodes_yx:
+        kind = "endpoint" if degrees[y, x] == 1 else "junction"
+        neighbours = []
+        for dy, dx in NEIGHBORS_8:
+            ny, nx = int(y + dy), int(x + dx)
+            if 0 <= ny < H and 0 <= nx < W and binary[ny, nx]:
+                neighbours.append((ny, nx))
+        angles = []
+        for ny, nx in neighbours:
+            angles.append(math.degrees(math.atan2(float(ny - y), float(nx - x))) % 360.0)
+        angle = angles[0] if angles else 0.0
+        # Incident branch length provides a deterministic ranking proxy.
+        weight = float(len(neighbours))
+        records.append({"x": float(x), "y": float(y), "type": kind, "angle": angle, "weight": weight})
+    records.sort(key=lambda item: (-item["weight"], item["y"], item["x"]))
+    return records[:max(0, int(max_points))]
 
 def extract_skeleton_graph(
     groove_skeleton: np.ndarray,
