@@ -31,7 +31,7 @@ from groove_extractor import (
     skeletonize_grooves,
     isolate_muzzle_region,
 )
-from groove_graph import extract_skeleton_graph, visualize_groove_graph, prune_skeleton
+from groove_graph import extract_skeleton_graph, visualize_groove_graph, prune_skeleton, extract_minutiae_points
 
 OUTPUT_BASE = PROJECT_ROOT / "output" / "video_five_frames"
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
@@ -708,14 +708,21 @@ def extract_five_muzzle_stages(
             "euler_characteristic": int(desc["euler_characteristic"]),
         }
 
+        ranked_minutiae = extract_minutiae_points(
+            pruned_skeleton,
+            max_points=int(matcher_params.get("max_minutiae_points", 250)),
+        )
+        # Keep the legacy orientation key while exposing angle/weight for spatial matching.
         minutiae = [
             {
-                "x": float(n["pos"][0]),
-                "y": float(n["pos"][1]),
-                "type": n["type"],
-                "orientation": float(n.get("orientation", 0.0)),
+                "x": float(point["x"]),
+                "y": float(point["y"]),
+                "type": point["type"],
+                "orientation": float(point["angle"]),
+                "angle": float(point["angle"]),
+                "weight": float(point["weight"]),
             }
-            for n in graph_res["node_list"]
+            for point in ranked_minutiae
         ]
 
         for k in FEATURE_KEYS:
