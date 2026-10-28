@@ -381,8 +381,8 @@ def extract_five_muzzle_stages(
     1. Loads singleton Mask R-CNN detector with weights (crop11dec.h5).
     2. Samples ~30 candidate frames evenly distributed across video duration.
     3. Evaluates motion blur (Laplacian variance) and detects muzzle with Mask R-CNN.
-    4. Applies quality gating: rejects low-conf (<0.70), blurred (<25.0), and partial muzzles.
-    5. Scores valid candidates and selects top 5 temporally spread-out frames.
+    4. Applies confidence, Laplacian sharpness, border-margin and mask-area gates from matching_params.json.
+    5. Scores valid candidates and selects top_k_frames temporally spread-out frames.
     6. Canonically aligns each crop (nostril leveling / moment symmetry) to 448x448.
     7. Applies CLAHE ridge enhancement on aligned crop.
     8. Applies Frangi Hessian or Black-Hat filtering + Adaptive/Otsu thresholding.
@@ -401,6 +401,27 @@ def extract_five_muzzle_stages(
     v_path = Path(video_path).resolve()
     if not v_path.is_file():
         raise FileNotFoundError(f"Video file not found at: {v_path}")
+
+    matcher_params_path = PROJECT_ROOT / "config" / "matching_params.json"
+    try:
+        with open(matcher_params_path, "r", encoding="utf-8") as handle:
+            matcher_params = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        matcher_params = {
+            "num_candidate_frames": 30, "top_k_frames": 5,
+            "min_detection_confidence": 0.90, "min_mask_area_ratio": 0.05,
+            "border_margin_px": 6, "min_laplacian_var": 35.0,
+            "canonical_size": 448, "min_spur_length": min_spur_length,
+            "min_component_size": min_component_size,
+        }
+
+    num_candidate_frames = max(1, int(matcher_params.get("num_candidate_frames", 30)))
+    top_k_frames = max(1, int(matcher_params.get("top_k_frames", 5)))
+    min_detection_confidence = float(matcher_params.get("min_detection_confidence", 0.90))
+    min_mask_area_ratio = float(matcher_params.get("min_mask_area_ratio", 0.05))
+    border_margin_px = max(0, int(matcher_params.get("border_margin_px", 6)))
+    min_laplacian_var = float(matcher_params.get("min_laplacian_var", 35.0))
+    canonical_size = max(32, int(matcher_params.get("canonical_size", 448)))
 
     stem = v_path.stem
     cache_dir = OUTPUT_BASE / f"{stem}_{method}_{threshold_method}"
@@ -427,7 +448,7 @@ def extract_five_muzzle_stages(
         raise RuntimeError(f"Video contains 0 frames: {v_path}")
 
     # Sample ~30 candidate frames evenly distributed across video duration
-    num_samples = min(30, total_frames)
+    num_samples = min(num_candidate_frames, total_frames)
     candidate_indices = np.linspace(0, total_frames - 1, num_samples, dtype=int).tolist()
     candidate_indices = sorted(list(dict.fromkeys(candidate_indices)))
     log(f"Sampling {len(candidate_indices)} candidate frames across video duration for quality gating...")
@@ -479,11 +500,11 @@ def extract_five_muzzle_stages(
         passed_gating = True
         reasons = []
 
-        if conf < 0.70:
+        if conf < min_detection_confidence:
             passed_gating = False
             reasons.append(f"low_conf={conf:.2f}")
 
-        if lap_var < 25.0:
+        if lap_var < min_laplacian_var:
             passed_gating = False
             reasons.append(f"blurred={lap_var:.1f}")
 
@@ -491,7 +512,7 @@ def extract_five_muzzle_stages(
         if bbox is not None and len(bbox) == 4:
             y1, x1, y2, x2 = bbox
             if orig_h >= 100 and orig_w >= 100:
-                margin = 5
+                margin = border_margin_px
                 if y1 < margin or x1 < margin or (orig_h - y2) < margin or (orig_w - x2) < margin:
                     passed_gating = False
                     reasons.append("boundary_margin")
@@ -502,7 +523,7 @@ def extract_five_muzzle_stages(
                 m_patch = full_mask[max(0, y1):min(orig_h, y2), max(0, x1):min(orig_w, x2)]
                 mask_area = float(np.count_nonzero(m_patch))
                 mask_ratio = mask_area / float(bbox_area)
-                if mask_ratio < 0.25:
+                if mask_ratio < min_mask_area_ratio:
                     passed_gating = False
                     reasons.append(f"low_mask_ratio={mask_ratio:.2f}")
 
@@ -542,7 +563,7 @@ def extract_five_muzzle_stages(
     def try_select(pool: List[Dict[str, Any]], min_sep: int, current: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         res = list(current)
         for cand in pool:
-            if len(res) >= 5:
+            if len(res) >= top_k_frames:
                 break
             if all(abs(cand["frame_idx"] - s["frame_idx"]) >= min_sep for s in res):
                 res.append(cand)
@@ -564,7 +585,7 @@ def extract_five_muzzle_stages(
 
     # Sort selected frames chronologically
     selected.sort(key=lambda c: c["frame_idx"])
-    detected_candidates = selected[:5]
+    detected_candidates = selected[:top_k_frames]
 
     log(f"Selected {len(detected_candidates)} frames for groove extraction: {[c['frame_idx'] for c in detected_candidates]}")
 
@@ -587,7 +608,7 @@ def extract_five_muzzle_stages(
 
         # 2. Canonical alignment & 2x Lanczos-4 target sizing (448x448)
         aligned_bgr, aligned_mask, align_meta = canonical_align_muzzle(
-            native_bgr, mask=crop_mask, target_size=448
+            native_bgr, mask=crop_mask, target_size=canonical_size
         )
         angle_deg = float(align_meta.get("rotation_deg", 0.0))
         alignment_method = align_meta.get("alignment_method", "mask_principal_axis")
@@ -679,7 +700,7 @@ def extract_five_muzzle_stages(
 
         rel_base = f"/output/video_five_frames/{cache_dir.name}"
         # Backend-only spatial feature arrays are held by the server's LRU cache.
-        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
+        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((canonical_size, canonical_size), 255, dtype=np.uint8)
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
         # Store the matcher arrays after stage extraction; they remain backend-only.
