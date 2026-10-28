@@ -981,7 +981,6 @@ class ExtractVideoFiveFramesRequest(BaseModel):
     min_spur_length: Optional[int] = 8
     min_component_size: Optional[int] = 30
 
-
 class CosineSimilarityRequest(BaseModel):
     vector_a: List[float]
     vector_b: List[float]
