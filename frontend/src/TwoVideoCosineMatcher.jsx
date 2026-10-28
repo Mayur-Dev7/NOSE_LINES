@@ -1121,7 +1121,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   Method A: SIFT / ORB + RANSAC
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
-                  Score: {biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score !== undefined ? (biometricMatchResult.method_a.score * 100).toFixed(1) : (biometricMatchResult.inlier_ratio !== undefined ? (biometricMatchResult.inlier_ratio * 100).toFixed(1) : 'N/A')}%
+                  Score: {((biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score ?? biometricMatchResult.inlier_ratio) !== undefined)
+                    ? (((biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score ?? biometricMatchResult.inlier_ratio) * 100).toFixed(1))
+                    : 'N/A'}%
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
@@ -1151,7 +1153,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   Method B: Skeleton Minutiae Topology
                 </span>
                 <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-500/30 font-bold">
-                  Score: {biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score !== undefined ? (biometricMatchResult.method_b.score * 100).toFixed(1) : (biometricMatchResult.matched_minutiae_fraction !== undefined ? (biometricMatchResult.matched_minutiae_fraction * 100).toFixed(1) : 'N/A')}%
+                  Score: {((biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score ?? biometricMatchResult.matched_minutiae_fraction) !== undefined)
+                    ? (((biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score ?? biometricMatchResult.matched_minutiae_fraction) * 100).toFixed(1))
+                    : 'N/A'}%
                 </span>
               </div>
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
