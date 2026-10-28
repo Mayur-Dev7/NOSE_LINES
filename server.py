@@ -59,6 +59,7 @@ from muzzle_matcher import (
     match_muzzle_frame_sets,
     match_two_videos_end_to_end,
     load_matcher_config,
+    match_video_sets as match_spatial_video_sets,
 )
 WEIGHTS_PATH = Path("/home/adis_mayur/F_CODES/crop11dec.h5")
 PYTHON_EXEC = BASE_DIR / ".venv" / "bin" / "python"
@@ -1053,71 +1054,169 @@ class VideoMatchRequest(BaseModel):
 
 @app.get("/api/video/matcher-config")
 async def get_matcher_config_endpoint():
-    """
-    Reads matcher_config.json if it exists.
-    If not found or uncalibrated, returns {"calibrated": False, "status": "UNCALIBRATED", "threshold": None}.
-    """
+    """Legacy matcher config endpoint retained for compatibility."""
     return load_matcher_config()
+
+
+# Cache holds NumPy arrays only in backend memory. JSON responses are always plain data.
+from collections import OrderedDict
+import hashlib
+
+_EXTRACTION_CACHE = OrderedDict()
+_EXTRACTION_CACHE_MAX = 8
+
+
+def _json_safe_frame(frame):
+    return {k: v for k, v in frame.items() if not isinstance(v, np.ndarray)}
+
+
+def _spatial_cache_key(video_path, method, threshold_method, adaptive_block_size, adaptive_c,
+                       exclude_nostrils, min_spur_length, min_component_size, device, cpu_cores):
+    stat = Path(video_path).stat()
+    signature = f"{Path(video_path).resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{method}:{threshold_method}:{adaptive_block_size}:{adaptive_c}:{exclude_nostrils}:{min_spur_length}:{min_component_size}:{device}:{cpu_cores}"
+    return hashlib.sha256(signature.encode("utf-8")).hexdigest()
+
+
+def _put_extraction_cache(key, frames):
+    _EXTRACTION_CACHE[key] = frames
+    _EXTRACTION_CACHE.move_to_end(key)
+    while len(_EXTRACTION_CACHE) > _EXTRACTION_CACHE_MAX:
+        _EXTRACTION_CACHE.popitem(last=False)
+
+
+def _get_extraction_cache(key):
+    frames = _EXTRACTION_CACHE.get(key)
+    if frames is not None:
+        _EXTRACTION_CACHE.move_to_end(key)
+    return frames
+
+
+def _extract_video_for_spatial_match(video_path, req):
+    """Synchronous extraction helper; caller controls the extraction lock."""
+    return extract_five_frames_groove_features(
+        video_path=str(video_path),
+        method=req.filter_method or "frangi",
+        threshold_method=req.threshold_method or "adaptive",
+        adaptive_block_size=int(req.adaptive_block_size or 15),
+        adaptive_c=int(req.adaptive_c or 2),
+        exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+        device=req.device or "cpu",
+        cpu_cores=int(req.cpu_cores or 6),
+        min_spur_length=int(req.min_spur_length or 8),
+        min_component_size=int(req.min_component_size or 30),
+    )
+
+
+@app.get("/api/video/match-config")
+async def get_spatial_match_config_endpoint():
+    """Return the dedicated spatial matcher calibration state, never legacy calibration."""
+    params_path = BASE_DIR / "config" / "matching_params.json"
+    threshold_path = BASE_DIR / "config" / "matching_threshold.json"
+    params = json.loads(params_path.read_text(encoding="utf-8"))
+    calibrated = False
+    threshold = None
+    try:
+        config = json.loads(threshold_path.read_text(encoding="utf-8"))
+        value = float(config["threshold"])
+        calibrated = bool(config.get("calibrated")) and int(config.get("genuine_pairs", 0)) >= 30 and int(config.get("impostor_pairs", 0)) >= 30
+        if calibrated:
+            threshold = value
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        pass
+    return {
+        "calibrated": calibrated,
+        "status": "CALIBRATED" if calibrated else "UNCALIBRATED",
+        "threshold": threshold,
+        "dev_provisional_threshold": float(params["dev_provisional_threshold"]),
+        "min_calibration_genuine_pairs": int(params["min_calibration_genuine_pairs"]),
+        "min_calibration_impostor_pairs": int(params["min_calibration_impostor_pairs"]),
+    }
 
 
 @app.post("/api/video/match")
 async def match_video_endpoint(req: VideoMatchRequest):
-    """
-    Executes SIFT/RANSAC Keypoint Matching and Minutiae Matching across cattle muzzle frame sets or videos.
-    Checks matcher_config.json for calibrated threshold, formats response, and returns JSON.
-    """
+    """Match two video identifiers through a bounded cache and the spatial matcher."""
+    if not req.video_a_path or not req.video_b_path:
+        raise HTTPException(
+            status_code=400,
+            detail="Both video_a_path and video_b_path must be provided.",
+        )
+    va = resolve_video_path(req.video_a_path)
+    vb = resolve_video_path(req.video_b_path)
+    if not va or not va.exists():
+        raise HTTPException(status_code=404, detail=f"Video A not found: {req.video_a_path}")
+    if not vb or not vb.exists():
+        raise HTTPException(status_code=404, detail=f"Video B not found: {req.video_b_path}")
+
+    options = (
+        req.filter_method or "frangi",
+        req.threshold_method or "adaptive",
+        int(req.adaptive_block_size or 15),
+        int(req.adaptive_c or 2),
+        bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+        int(req.min_spur_length or 8),
+        int(req.min_component_size or 30),
+        req.device or "cpu",
+        int(req.cpu_cores or 6),
+    )
+    keys = [
+        _spatial_cache_key(path, *options) for path in (va, vb)
+    ]
+    frame_sets = [_get_extraction_cache(key) for key in keys]
+
+    async def extract_missing(path, key):
+        async with _EXTRACTION_LOCK:
+            result = await asyncio.to_thread(_extract_video_for_spatial_match, path, req)
+            frames = result.get("frames") or []
+            _put_extraction_cache(key, frames)
+            return frames
+
+    try:
+        if frame_sets[0] is None:
+            frame_sets[0] = await extract_missing(va, keys[0])
+        if frame_sets[1] is None:
+            frame_sets[1] = await extract_missing(vb, keys[1])
+        if not frame_sets[0] or not frame_sets[1]:
+            raise HTTPException(status_code=422, detail="One or both videos produced no usable frames.")
+
+        result = await asyncio.to_thread(match_spatial_video_sets, frame_sets[0], frame_sets[1])
+        # The matcher has already converted its visualization to base64. Never serialize ndarrays.
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Spatial video matching failed: {exc}")
+
+
+@app.post("/api/video/match-legacy")
+async def match_video_legacy_endpoint(req: VideoMatchRequest):
+    """Compatibility endpoint for the previous SIFT/minutiae API."""
     loop = asyncio.get_event_loop()
     from functools import partial
-
-    # Option 1: Direct matching on pre-extracted frame data
     if req.frames_a and req.frames_b:
         try:
-            fn = partial(
-                match_muzzle_frame_sets,
-                frames_a=req.frames_a,
-                frames_b=req.frames_b,
-                output_dir=OUTPUT_DIR,
-            )
-            res = await loop.run_in_executor(None, fn)
-            return res
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Frame set matching failed: {str(e)}")
-
-    # Option 2: Full end-to-end matching from two video files
+            fn = partial(match_muzzle_frame_sets, frames_a=req.frames_a, frames_b=req.frames_b, output_dir=OUTPUT_DIR)
+            return await loop.run_in_executor(None, fn)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Frame set matching failed: {exc}")
     if req.video_a_path and req.video_b_path:
-        va = resolve_video_path(req.video_a_path)
-        vb = resolve_video_path(req.video_b_path)
+        va, vb = resolve_video_path(req.video_a_path), resolve_video_path(req.video_b_path)
         if not va or not va.exists():
             raise HTTPException(status_code=404, detail=f"Video A not found: {req.video_a_path}")
         if not vb or not vb.exists():
             raise HTTPException(status_code=404, detail=f"Video B not found: {req.video_b_path}")
-
-        fn = partial(
-            match_two_videos_end_to_end,
-            video_a_path=str(va),
-            video_b_path=str(vb),
-            filter_method=req.filter_method or "frangi",
-            threshold_method=req.threshold_method or "adaptive",
-            adaptive_block_size=int(req.adaptive_block_size or 15),
-            adaptive_c=int(req.adaptive_c or 2),
+        fn = partial(match_two_videos_end_to_end,
+            video_a_path=str(va), video_b_path=str(vb),
+            filter_method=req.filter_method or "frangi", threshold_method=req.threshold_method or "adaptive",
+            adaptive_block_size=int(req.adaptive_block_size or 15), adaptive_c=int(req.adaptive_c or 2),
             exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
-            device=req.device or "cpu",
-            cpu_cores=int(req.cpu_cores or 6),
-            output_dir=OUTPUT_DIR,
-        )
-
+            device=req.device or "cpu", cpu_cores=int(req.cpu_cores or 6), output_dir=OUTPUT_DIR)
         try:
             async with _EXTRACTION_LOCK:
-                res = await loop.run_in_executor(None, fn)
-                return res
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Video matching failed: {str(e)}")
-
-    raise HTTPException(
-        status_code=400,
-        detail="Either (video_a_path and video_b_path) or (frames_a and frames_b) must be provided.",
-    )
-
+                return await loop.run_in_executor(None, fn)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Legacy video matching failed: {exc}")
+    raise HTTPException(status_code=400, detail="Legacy endpoint requires video paths or pre-extracted frame sets.")
 
 
 # Static file serving
