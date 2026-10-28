@@ -1014,6 +1014,8 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
         exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
         device=req.device or "cpu",
         cpu_cores=int(req.cpu_cores or 6),
+        min_spur_length=int(req.min_spur_length or 8),
+        min_component_size=int(req.min_component_size or 30),
     )
     try:
         async with _EXTRACTION_LOCK:
