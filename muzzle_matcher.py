@@ -1527,3 +1527,302 @@ if __name__ == "__main__":
         json_stream=args.json_stream,
         fast_mode=args.fast_mode,
     )
+
+
+# ---------------------------------------------------------------------------
+# Spatial matcher API (kept alongside legacy functions for backwards compatibility)
+# ---------------------------------------------------------------------------
+import base64 as _spatial_base64
+
+SPATIAL_PARAMS_PATH = SCRIPT_DIR / "config" / "matching_params.json"
+SPATIAL_THRESHOLD_PATH = SCRIPT_DIR / "config" / "matching_threshold.json"
+
+
+def _spatial_load_params(path="config/matching_params.json"):
+    p = Path(path)
+    if not p.is_absolute():
+        p = SCRIPT_DIR / p
+    with open(p, "r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _spatial_gray(frame):
+    image = frame.get("clahe_gray")
+    if image is None:
+        image = frame.get("enhanced_gray")
+    if image is None:
+        image = frame.get("enhanced_path") or frame.get("skeleton_path")
+        if isinstance(image, str):
+            p = Path(image)
+            if not p.is_absolute():
+                p = SCRIPT_DIR / image.lstrip("/")
+            image = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE) if p.exists() else None
+    if image is None:
+        raise ValueError("Frame must contain clahe_gray, enhanced_gray, or enhanced_path.")
+    image = np.asarray(image)
+    if image.ndim == 3:
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    size = int(_spatial_load_params().get("canonical_size", 448))
+    if image.shape[:2] != (size, size):
+        image = cv2.resize(image, (size, size), interpolation=cv2.INTER_AREA)
+    return image.astype(np.uint8)
+
+
+def _spatial_mask(frame, shape, params):
+    raw = frame.get("mask")
+    if raw is None:
+        raw = frame.get("aligned_mask")
+    if raw is None:
+        raw = frame.get("muzzle_mask")
+    if raw is None:
+        raw = np.full(shape, 255, dtype=np.uint8)
+    else:
+        raw = np.asarray(raw)
+        if raw.ndim == 3:
+            raw = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
+        if raw.shape[:2] != shape:
+            raw = cv2.resize(raw, (shape[1], shape[0]), interpolation=cv2.INTER_NEAREST)
+        raw = np.where(raw > 0, 255, 0).astype(np.uint8)
+    erosion = int(params["mask_erosion_px"])
+    if erosion > 0 and np.count_nonzero(raw) > 0:
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * erosion + 1, 2 * erosion + 1))
+        eroded = cv2.erode(raw, kernel)
+        if np.count_nonzero(eroded) >= 64:
+            raw = eroded
+    return raw
+
+
+def _spatial_skeleton(frame, mask):
+    raw = frame.get("skeleton")
+    if raw is None:
+        raw = frame.get("groove_skeleton")
+    if raw is None:
+        raw = frame.get("skeleton_path")
+    if isinstance(raw, str):
+        p = Path(raw)
+        if not p.is_absolute():
+            p = SCRIPT_DIR / raw.lstrip("/")
+        raw = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE) if p.exists() else None
+    if raw is None:
+        return None
+    raw = np.asarray(raw)
+    if raw.ndim == 3:
+        raw = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
+    if raw.shape[:2] != mask.shape:
+        raw = cv2.resize(raw, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_NEAREST)
+    return np.where((raw > 0) & (mask > 0), 255, 0).astype(np.uint8)
+
+
+def _spatial_minutiae(frame, skeleton, params):
+    raw = frame.get("minutiae")
+    if not isinstance(raw, list) or not raw:
+        if skeleton is None:
+            return []
+        raw = extract_minutiae_points(skeleton, max_minutiae=int(params["max_minutiae_points"]))
+    out = []
+    for item in raw[: int(params["max_minutiae_points"])]:
+        try:
+            out.append({
+                "x": float(item["x"]), "y": float(item["y"]),
+                "type": str(item.get("type", "endpoint")),
+                "angle": float(item.get("angle", item.get("orientation", 0.0))) % 360.0,
+                "weight": float(item.get("weight", 1.0)),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _spatial_patch(gray, x, y, size=16):
+    half = size // 2
+    xi, yi = int(round(x)), int(round(y))
+    if xi - half < 0 or yi - half < 0 or xi + half > gray.shape[1] or yi + half > gray.shape[0]:
+        return None
+    patch = gray[yi-half:yi+half, xi-half:xi+half].astype(np.float32)
+    patch -= patch.mean()
+    norm = float(np.linalg.norm(patch))
+    return patch / norm if norm > 1e-6 else None
+
+
+def _spatial_angle_delta(a, b):
+    delta = abs((float(a) - float(b)) % 360.0)
+    return min(delta, 360.0 - delta)
+
+
+def _spatial_features(gray, mask, params):
+    glare_mask = mask.copy()
+    glare_mask[gray >= int(params["glare_threshold"])] = 0
+    try:
+        detector = cv2.SIFT_create(nfeatures=1800)
+        method = "sift"
+    except Exception:
+        detector = cv2.ORB_create(nfeatures=1800)
+        method = "orb"
+    keypoints, descriptors = detector.detectAndCompute(gray, glare_mask)
+    return method, keypoints or [], descriptors
+
+
+def _spatial_method_a(gray_a, gray_b, mask_a, mask_b, params):
+    method_a, kp_a, desc_a = _spatial_features(gray_a, mask_a, params)
+    method_b, kp_b, desc_b = _spatial_features(gray_b, mask_b, params)
+    detector_name = method_a if method_a == method_b else "mixed"
+    result = {"detector": detector_name, "inlier_count": 0, "inlier_ratio": 0.0,
+              "score": 0.0, "kp_a": kp_a, "kp_b": kp_b, "matches": [],
+              "inlier_mask": [], "transform_matrix": None}
+    if desc_a is None or desc_b is None or len(desc_a) < 2 or len(desc_b) < 2:
+        return result
+    norm = cv2.NORM_HAMMING if "orb" in (method_a, method_b) else cv2.NORM_L2
+    matcher = cv2.BFMatcher(norm)
+    try:
+        pairs = matcher.knnMatch(desc_a, desc_b, k=2)
+    except cv2.error:
+        return result
+    good = [p[0] for p in pairs if len(p) == 2 and p[0].distance < float(params["sift_lowe_ratio"]) * p[1].distance]
+    result["matches"] = good
+    if len(good) < 3:
+        return result
+    points_a = np.float32([kp_a[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+    points_b = np.float32([kp_b[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    transform, inliers_mask = cv2.estimateAffinePartial2D(
+        points_a, points_b, method=cv2.RANSAC,
+        ransacReprojThreshold=float(params["sift_ransac_reproj_thresh"]),
+    )
+    if transform is None or inliers_mask is None:
+        return result
+    scale = math.hypot(float(transform[0, 0]), float(transform[1, 0]))
+    angle = math.degrees(math.atan2(float(transform[1, 0]), float(transform[0, 0])))
+    if not (0.65 <= scale <= 1.55 and abs(angle) <= 55.0):
+        return result
+    inlier_flags = inliers_mask.ravel().astype(bool)
+    inlier_count = int(inlier_flags.sum())
+    inlier_ratio = inlier_count / max(1, len(good))
+    score = inlier_ratio * min(1.0, inlier_count / max(1, int(params["sift_min_inliers_full_weight"])))
+    result.update({"inlier_count": inlier_count, "inlier_ratio": float(inlier_ratio),
+                   "score": float(np.clip(score, 0.0, 1.0)),
+                   "inlier_mask": inlier_flags.tolist(), "transform_matrix": transform})
+    return result
+
+
+def _spatial_method_b(gray_a, gray_b, points_a, points_b, params):
+    empty = {"matched_count": 0, "matched_fraction": 0.0, "score": 0.0,
+             "pairs": [], "transform_matrix": None}
+    if len(points_a) < 2 or len(points_b) < 2:
+        return empty
+    # Build plausible pairs using position, orientation, and local normalized patch correlation.
+    # Endpoint/junction types are intentionally not a hard constraint.
+    choices = []
+    radius = float(params["minutiae_max_radius_px"])
+    max_angle = float(params["minutiae_max_angle_deg"])
+    min_corr = float(params["minutiae_min_patch_corr"])
+    patches_a = [_spatial_patch(gray_a, p["x"], p["y"]) for p in points_a]
+    patches_b = [_spatial_patch(gray_b, p["x"], p["y"]) for p in points_b]
+    for i, a in enumerate(points_a):
+        pa = patches_a[i]
+        if pa is None:
+            continue
+        for j, b in enumerate(points_b):
+            if _spatial_angle_delta(a["angle"], b["angle"]) > max_angle:
+                continue
+            if math.hypot(a["x"] - b["x"], a["y"] - b["y"]) > radius:
+                continue
+            pb = patches_b[j]
+            if pb is None:
+                continue
+            corr = float(np.sum(pa * pb))
+            if corr >= min_corr:
+                choices.append((corr, i, j))
+    choices.sort(reverse=True)
+    candidate_pairs, used_a, used_b = [], set(), set()
+    for corr, i, j in choices:
+        if i not in used_a and j not in used_b:
+            candidate_pairs.append((i, j, corr))
+            used_a.add(i); used_b.add(j)
+    if len(candidate_pairs) < 3:
+        return empty
+    coords_a = np.float32([[points_a[i]["x"], points_a[i]["y"]] for i, _, _ in candidate_pairs]).reshape(-1, 1, 2)
+    coords_b = np.float32([[points_b[j]["x"], points_b[j]["y"]] for _, j, _ in candidate_pairs]).reshape(-1, 1, 2)
+    transform, inlier_mask = cv2.estimateAffinePartial2D(
+        coords_a, coords_b, method=cv2.RANSAC,
+        ransacReprojThreshold=float(params["minutiae_ransac_reproj_thresh"]),
+    )
+    if transform is None or inlier_mask is None:
+        return empty
+    flags = inlier_mask.ravel().astype(bool)
+    matched = int(flags.sum())
+    fraction = matched / max(1, min(len(points_a), len(points_b)))
+    return {"matched_count": matched, "matched_fraction": float(np.clip(fraction, 0.0, 1.0)),
+            "score": float(np.clip(fraction, 0.0, 1.0)),
+            "pairs": [candidate_pairs[i] for i, ok in enumerate(flags) if ok],
+            "transform_matrix": transform}
+
+
+def match_frame_pair(frame_a, frame_b, params_path="config/matching_params.json") -> Dict[str, Any]:
+    params = _spatial_load_params(params_path)
+    gray_a, gray_b = _spatial_gray(frame_a), _spatial_gray(frame_b)
+    mask_a, mask_b = _spatial_mask(frame_a, gray_a.shape, params), _spatial_mask(frame_b, gray_b.shape, params)
+    skel_a, skel_b = _spatial_skeleton(frame_a, mask_a), _spatial_skeleton(frame_b, mask_b)
+    mins_a = _spatial_minutiae(frame_a, skel_a, params)
+    mins_b = _spatial_minutiae(frame_b, skel_b, params)
+    method_a = _spatial_method_a(gray_a, gray_b, mask_a, mask_b, params)
+    method_b = _spatial_method_b(gray_a, gray_b, mins_a, mins_b, params)
+    score = float(params["weight_sift"]) * method_a["score"] + float(params["weight_minutiae"]) * method_b["score"]
+    return {"pair_score": float(np.clip(score, 0.0, 1.0)),
+            "method_a_sift": {k: method_a[k] for k in ("detector", "inlier_count", "inlier_ratio", "score")},
+            "method_b_minutiae": {k: method_b[k] for k in ("matched_count", "matched_fraction", "score")},
+            "_method_a": method_a, "_method_b": method_b, "_gray_a": gray_a, "_gray_b": gray_b}
+
+
+def _spatial_read_threshold(threshold_path="config/matching_threshold.json"):
+    p = Path(threshold_path)
+    if not p.is_absolute():
+        p = SCRIPT_DIR / p
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        threshold = float(data["threshold"])
+        genuine = int(data.get("genuine_pairs", 0))
+        impostor = int(data.get("impostor_pairs", 0))
+        calibrated = bool(data.get("calibrated")) and genuine >= 30 and impostor >= 30 and math.isfinite(threshold)
+        return calibrated, threshold if calibrated else None
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return False, None
+
+
+def _spatial_visualization(best, verdict, dev_threshold):
+    method_a = best["_method_a"]
+    gray_a, gray_b = best["_gray_a"], best["_gray_b"]
+    good = method_a.get("matches", [])
+    inlier_flags = method_a.get("inlier_mask", [])
+    inlier_matches = [m for m, is_inlier in zip(good, inlier_flags) if is_inlier]
+    canvas = cv2.drawMatches(cv2.cvtColor(gray_a, cv2.COLOR_GRAY2BGR), method_a.get("kp_a", []),
+                             cv2.cvtColor(gray_b, cv2.COLOR_GRAY2BGR), method_a.get("kp_b", []),
+                             inlier_matches[:80], None,
+                             matchColor=(70, 220, 100) if verdict == "MATCH" else (30, 180, 255),
+                             flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    banner = np.zeros((50, canvas.shape[1], 3), dtype=np.uint8)
+    cv2.putText(banner, f"{verdict} | spatial score {best['pair_score']:.3f} | DEV threshold {dev_threshold:.2f}",
+                (12, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.62, (240, 240, 240), 1, cv2.LINE_AA)
+    ok, encoded = cv2.imencode(".png", np.vstack([banner, canvas]))
+    return _spatial_base64.b64encode(encoded.tobytes()).decode("ascii") if ok else ""
+
+
+def match_video_sets(frames_a, frames_b, params_path="config/matching_params.json",
+                     threshold_path="config/matching_threshold.json") -> Dict[str, Any]:
+    params = _spatial_load_params(params_path)
+    if not frames_a or not frames_b:
+        raise ValueError("Both video frame sets must contain at least one frame.")
+    results = [match_frame_pair(a, b, params_path=params_path) for a in frames_a for b in frames_b]
+    scores = [r["pair_score"] for r in results]
+    best = results[int(np.argmax(scores))]
+    best_score, median_score = float(max(scores)), float(np.median(scores))
+    decision_score = float(params["weight_best_pair"]) * best_score + float(params["weight_median_pair"]) * median_score
+    calibrated, threshold = _spatial_read_threshold(threshold_path)
+    dev_threshold = float(params["dev_provisional_threshold"])
+    verdict = ("MATCH" if decision_score >= threshold else "NO_MATCH") if calibrated and threshold is not None else "UNCALIBRATED"
+    dev_hint = "DEV_LIKELY_MATCH" if decision_score >= dev_threshold else "DEV_LIKELY_NO_MATCH"
+    viz = _spatial_visualization(best, verdict if calibrated else dev_hint, dev_threshold)
+    return {"decision_score": round(decision_score, 5), "best_score": round(best_score, 5),
+            "median_score": round(median_score, 5), "method_a_sift": best["method_a_sift"],
+            "method_b_minutiae": best["method_b_minutiae"], "verdict": verdict,
+            "dev_hint": dev_hint, "calibrated": calibrated, "threshold": threshold,
+            "dev_provisional_threshold": dev_threshold, "match_viz_base64": viz,
+            "pair_count": len(results)}
