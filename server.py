@@ -978,6 +978,8 @@ class ExtractVideoFiveFramesRequest(BaseModel):
     exclude_nostrils: Optional[bool] = True
     device: Optional[str] = "cpu"
     cpu_cores: Optional[int] = 6
+    min_spur_length: Optional[int] = 8
+    min_component_size: Optional[int] = 30
 
 
 class CosineSimilarityRequest(BaseModel):
