@@ -17,9 +17,17 @@ import json
 import time
 import shutil
 import asyncio
+import functools
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Any, Dict
+
+if not hasattr(asyncio, "to_thread"):
+    async def _asyncio_to_thread(func, /, *args, **kwargs):
+        loop = asyncio.get_event_loop()
+        func_call = functools.partial(func, *args, **kwargs)
+        return await loop.run_in_executor(None, func_call)
+    asyncio.to_thread = _asyncio_to_thread
 
 import cv2
 import numpy as np
@@ -969,6 +977,15 @@ async def export_template_csv_endpoint(export_type: str, template_id: str):
 # 2-VIDEO 5-FRAME GROOVE PARAMETERS & COSINE SIMILARITY ENDPOINTS
 # =====================================================================
 
+# Cache holds NumPy arrays only in backend memory. JSON responses are always plain data.
+from collections import OrderedDict
+import hashlib
+from functools import partial
+
+_EXTRACTION_LOCK = asyncio.Lock()
+_EXTRACTION_CACHE = OrderedDict()
+_EXTRACTION_CACHE_MAX = 8
+
 def _json_safe_frame(frame):
     return {k: v for k, v in frame.items() if not isinstance(v, np.ndarray)}
 
@@ -1075,10 +1092,8 @@ class CosineSimilarityRequest(BaseModel):
     vector_b: List[float]
 
 
-_EXTRACTION_LOCK = asyncio.Lock()
-
-
 @app.get("/api/video/match-config")
+@app.get("/api/video/matcher-config")
 async def get_spatial_match_config_endpoint():
     """Return the dedicated spatial matcher calibration state, never legacy calibration."""
     params_path = BASE_DIR / "config" / "matching_params.json"
@@ -1103,6 +1118,8 @@ async def get_spatial_match_config_endpoint():
         "min_calibration_impostor_pairs": int(params["min_calibration_impostor_pairs"]),
     }
 
+get_matcher_config_endpoint = get_spatial_match_config_endpoint
+
 
 class VideoMatchRequest(BaseModel):
     video_a_path: Optional[str] = None
@@ -1124,7 +1141,14 @@ class VideoMatchRequest(BaseModel):
 
 @app.post("/api/video/match")
 async def match_video_endpoint(req: VideoMatchRequest):
-    """Match two video identifiers through a bounded cache and the spatial matcher."""
+    """Match two video identifiers through a bounded cache and the spatial matcher, or match pre-extracted frame sets."""
+    if req.frames_a and req.frames_b:
+        try:
+            fn = partial(match_muzzle_frame_sets, frames_a=req.frames_a, frames_b=req.frames_b, output_dir=OUTPUT_DIR)
+            return await asyncio.to_thread(fn)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Frame set matching failed: {exc}")
+
     if not req.video_a_path or not req.video_b_path:
         raise HTTPException(
             status_code=400,
@@ -1206,16 +1230,6 @@ async def match_video_legacy_endpoint(req: VideoMatchRequest):
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Legacy video matching failed: {exc}")
     raise HTTPException(status_code=400, detail="Legacy endpoint requires video paths or pre-extracted frame sets.")
-
-
-# Cache holds NumPy arrays only in backend memory. JSON responses are always plain data.
-from collections import OrderedDict
-import hashlib
-
-_EXTRACTION_CACHE = OrderedDict()
-_EXTRACTION_CACHE_MAX = 8
-
-
 
 
 # Static file serving

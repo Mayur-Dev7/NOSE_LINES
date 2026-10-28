@@ -1821,9 +1821,32 @@ def match_video_sets(frames_a, frames_b, params_path="config/matching_params.jso
     verdict = ("MATCH" if decision_score >= threshold else "NO_MATCH") if calibrated and threshold is not None else "UNCALIBRATED"
     dev_hint = "DEV_LIKELY_MATCH" if decision_score >= dev_threshold else "DEV_LIKELY_NO_MATCH"
     viz = _spatial_visualization(best, verdict if calibrated else dev_hint, dev_threshold)
-    return {"decision_score": round(decision_score, 5), "best_score": round(best_score, 5),
-            "median_score": round(median_score, 5), "method_a_sift": best["method_a_sift"],
-            "method_b_minutiae": best["method_b_minutiae"], "verdict": verdict,
-            "dev_hint": dev_hint, "calibrated": calibrated, "threshold": threshold,
-            "dev_provisional_threshold": dev_threshold, "match_viz_base64": viz,
-            "pair_count": len(results)}
+    return {
+        "decision_score": round(decision_score, 5),
+        "best_score": round(best_score, 5),
+        "median_score": round(median_score, 5),
+        "method_a_sift": best["method_a_sift"],
+        "method_b_minutiae": best["method_b_minutiae"],
+        "verdict": verdict,
+        "dev_hint": dev_hint,
+        "calibrated": calibrated,
+        "threshold": threshold,
+        "dev_provisional_threshold": dev_threshold,
+        "match_viz_base64": viz,
+        "pair_count": len(results),
+        # Backward-compatibility aliases:
+        "composite_score": round(decision_score, 5),
+        "is_match": bool(verdict == "MATCH" or (not calibrated and decision_score >= dev_threshold)),
+        "inlier_count": best["method_a_sift"]["inlier_count"],
+        "inlier_ratio": best["method_a_sift"]["inlier_ratio"],
+        "matched_minutiae_fraction": best["method_b_minutiae"]["matched_fraction"],
+        "method_a": best["method_a_sift"],
+        "method_b": best["method_b_minutiae"],
+        "visual_url": f"data:image/png;base64,{viz}" if viz else "",
+        "best_pair": {
+            "score": round(best_score, 5),
+            "inlier_count": best["method_a_sift"]["inlier_count"],
+            "inlier_ratio": best["method_a_sift"]["inlier_ratio"],
+            "matched_minutiae_fraction": best["method_b_minutiae"]["matched_fraction"],
+        },
+    }

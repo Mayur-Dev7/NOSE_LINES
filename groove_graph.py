@@ -86,36 +86,45 @@ def prune_skeleton(
 
     skel = remove_small_components(skel)
     H, W = skel.shape
+
+    def _crossing_number(py: int, px: int) -> int:
+        offsets = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
+        vals = []
+        for dy, dx in offsets:
+            ny, nx = py + dy, px + dx
+            if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0:
+                vals.append(1)
+            else:
+                vals.append(0)
+        vals.append(vals[0])
+        return sum(1 for i in range(8) if vals[i] == 0 and vals[i+1] == 1)
+
     # Prune one endpoint branch at a time. The walk stops as soon as the current
-    # path reaches a junction (including a junction neighbour), avoiding trunk nubs.
+    # path reaches a junction, avoiding trunk nubs.
     for _ in range(max(H, W)):
         deg = compute_skeleton_neighbor_degrees(skel)
         endpoints = np.argwhere((skel > 0) & (deg == 1))
         if len(endpoints) == 0:
             break
         removed_any = False
-        junction_mask = (skel > 0) & (deg >= 3)
         for ey, ex in endpoints:
             path = [(int(ey), int(ex))]
             prev = None
             curr = (int(ey), int(ex))
             reached_junction = False
             while True:
-                if junction_mask[curr]:
-                    reached_junction = True
-                    break
                 neighbours = []
                 for dy, dx in NEIGHBORS_8:
                     ny, nx = curr[0] + dy, curr[1] + dx
                     if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] and (ny, nx) != prev:
                         neighbours.append((ny, nx))
-                junction_neighbours = [pt for pt in neighbours if junction_mask[pt]]
-                if junction_neighbours:
-                    reached_junction = True
-                    break
                 if len(neighbours) != 1:
+                    reached_junction = len(neighbours) >= 2 or _crossing_number(curr[0], curr[1]) >= 3
                     break
                 nxt = neighbours[0]
+                if _crossing_number(nxt[0], nxt[1]) >= 3:
+                    reached_junction = True
+                    break
                 path.append(nxt)
                 prev, curr = curr, nxt
                 if len(path) > int(min_spur_length):

@@ -309,15 +309,14 @@ def canonical_align_muzzle(crop_bgr, mask, target_size=448):
     roi_h = max(1, int(h * 0.65))
     local = dark_response[:roi_h]
     local_mask = valid[:roi_h]
-    nonzero = local[(local_mask > 0) & (local > 0)]
+    roi_pixels = local[local_mask > 0]
     angle = 0.0
     method = "mask_principal_axis"
     points = []
-    if nonzero.size:
-        # Robust local-response threshold, independent of the global image histogram.
-        threshold = max(8.0, float(np.mean(nonzero) + 0.55 * np.std(nonzero)))
+    if roi_pixels.size and float(np.max(local)) >= 10.0:
+        threshold = max(15.0, float(np.mean(roi_pixels) + 1.8 * np.std(roi_pixels)))
+        threshold = min(threshold, max(15.0, 0.40 * float(np.max(local))))
         binary = np.where((local >= threshold) & (local_mask > 0), 255, 0).astype(np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
         count, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
         mask_area = max(1, int(np.count_nonzero(local_mask)))
         candidates = []

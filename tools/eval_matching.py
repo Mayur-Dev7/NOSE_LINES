@@ -941,7 +941,7 @@ def run_spatial_calibration(dataset_dir: Path, report_path: Path, allow_dev_smal
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Spatial muzzle matcher evaluation and threshold calibration",
+        description="Cattle Muzzle Biometric Evaluation Harness - Spatial muzzle matcher evaluation and threshold calibration",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument("--dataset-dir", default=str(PROJECT_ROOT / "dataset"))
