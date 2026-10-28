@@ -922,7 +922,7 @@ def run_spatial_calibration(dataset_dir: Path, report_path: Path, allow_dev_smal
     # Small-data runs still emit report and ROC/EER plots for diagnostics.
     genuine_scores = [row["score"] for row in genuine]
     impostor_scores = [row["score"] for row in impostor]
-    if genuine_scores or impostor_scores:
+    if genuine_scores and impostor_scores:
         roc = compute_roc_eer(genuine_scores, impostor_scores)
         report["roc_eer"] = {k: v for k, v in roc.items() if not isinstance(v, (np.ndarray,))}
         hist_path = report_path.parent / "spatial_score_distribution.png"
