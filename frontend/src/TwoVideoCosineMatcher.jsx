@@ -1082,7 +1082,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               <div className={`px-5 py-3 rounded-2xl border font-black text-sm flex items-center gap-2.5 shadow-lg ${
                 biometricMatchResult.calibrated === false
                   ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-amber-500/20'
-                  : biometricMatchResult.is_match
+                  : biometricMatchResult.verdict === 'MATCH'
                   ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-emerald-500/20'
                   : 'bg-rose-500/20 border-rose-500/60 text-rose-300 shadow-rose-500/20'
               }`}>
