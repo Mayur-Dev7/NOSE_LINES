@@ -901,6 +901,8 @@ def run_spatial_calibration(dataset_dir: Path, report_path: Path, allow_dev_smal
         "uncalibrated_warning": None if enough and not allow_dev_small_dataset else "Not enough qualifying calibration pairs or development-only mode.",
     })
 
+    # The development-only flag must never write a calibration threshold, even if
+    # its small sample happens to cross the pair-count gate.
     if enough and not allow_dev_small_dataset:
         threshold_path.parent.mkdir(parents=True, exist_ok=True)
         threshold_path.write_text(json.dumps({
