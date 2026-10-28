@@ -361,6 +361,7 @@ def canonical_align_muzzle(crop_bgr, mask, target_size=448):
         "nostril_points": points,
     }
 
+# Optional frame-selection options accepted by the API wrapper; defaults preserve previous callers.
 def extract_five_muzzle_stages(
     video_path: Union[str, Path],
     method: str = "frangi",                     # 'frangi' (Frangi Hessian) or 'blackhat'
