@@ -131,11 +131,7 @@ def prune_skeleton(
 
 
 def extract_minutiae_points(skel, max_points=250):
-    """Extract endpoint/junction minutiae ranked by their longest incident branch.
-
-    The API intentionally returns x, y, type, angle and weight as required by
-    the spatial matcher. This helper is separate from legacy graph records.
-    """
+    """Return endpoints/junctions ranked by longest incident skeleton branch."""
     if skel is None or skel.size == 0:
         return []
     binary = (np.asarray(skel) > 0).astype(np.uint8)
@@ -143,27 +139,56 @@ def extract_minutiae_points(skel, max_points=250):
         binary = cv2.cvtColor(binary, cv2.COLOR_BGR2GRAY)
         binary = (binary > 0).astype(np.uint8)
     degrees = compute_skeleton_neighbor_degrees(binary)
-    nodes_yx = np.argwhere((binary > 0) & ((degrees == 1) | (degrees >= 3)))
+    node_mask = (binary > 0) & ((degrees == 1) | (degrees >= 3))
+    nodes_yx = np.argwhere(node_mask)
     if not len(nodes_yx):
         return []
     H, W = binary.shape
-    records = []
-    for y, x in nodes_yx:
-        kind = "endpoint" if degrees[y, x] == 1 else "junction"
-        neighbours = []
+
+    def neighbours(y, x, previous=None):
+        result = []
         for dy, dx in NEIGHBORS_8:
             ny, nx = int(y + dy), int(x + dx)
-            if 0 <= ny < H and 0 <= nx < W and binary[ny, nx]:
-                neighbours.append((ny, nx))
-        angles = []
-        for ny, nx in neighbours:
-            angles.append(math.degrees(math.atan2(float(ny - y), float(nx - x))) % 360.0)
-        angle = angles[0] if angles else 0.0
-        # Incident branch length provides a deterministic ranking proxy.
-        weight = float(len(neighbours))
-        records.append({"x": float(x), "y": float(y), "type": kind, "angle": angle, "weight": weight})
+            if 0 <= ny < H and 0 <= nx < W and binary[ny, nx] and (ny, nx) != previous:
+                result.append((ny, nx))
+        return result
+
+    records = []
+    for yv, xv in nodes_yx:
+        y, x = int(yv), int(xv)
+        kind = "endpoint" if degrees[y, x] == 1 else "junction"
+        branch_data = []
+        for first in neighbours(y, x):
+            previous, current = (y, x), first
+            branch_length = 1
+            seen = {previous, current}
+            while not node_mask[current]:
+                next_points = [point for point in neighbours(*current, previous=previous) if point not in seen]
+                if len(next_points) != 1:
+                    break
+                nxt = next_points[0]
+                previous, current = current, nxt
+                seen.add(current)
+                branch_length += 1
+                if branch_length > H * W:
+                    break
+            dy, dx = first[0] - y, first[1] - x
+            branch_angle = math.degrees(math.atan2(float(dy), float(dx))) % 360.0
+            branch_data.append((branch_length, branch_angle))
+        branch_data.sort(key=lambda item: item[0], reverse=True)
+        longest = float(branch_data[0][0]) if branch_data else 0.0
+        angle = float(branch_data[0][1]) if branch_data else 0.0
+        records.append({
+            "x": float(x),
+            "y": float(y),
+            "type": kind,
+            "angle": angle,
+            "weight": longest,
+        })
     records.sort(key=lambda item: (-item["weight"], item["y"], item["x"]))
     return records[:max(0, int(max_points))]
+
+
 
 def extract_skeleton_graph(
     groove_skeleton: np.ndarray,
