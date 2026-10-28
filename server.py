@@ -1,0 +1,753 @@
+#!/usr/bin/env python3
+"""
+FastAPI Server for Cattle Muzzle Detection & Cropping UI
+======================================================
+Provides REST and Server-Sent Event (SSE) endpoints for:
+- Hardware status & options (RTX 3050 GPU, Ryzen CPU 2 Cores vs 12 Threads)
+- Video upload & frame extraction
+- Real-time muzzle detection, segmentation & cropping with microsecond log streaming
+- Hardware benchmark streaming
+- Serving generated cropped muzzles and React frontend
+"""
+
+import os
+import sys
+import glob
+import json
+import time
+import shutil
+import asyncio
+import subprocess
+from pathlib import Path
+from typing import Optional, List, Any, Dict
+
+import cv2
+import numpy as np
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, Body
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
+from pydantic import BaseModel, Field
+
+BASE_DIR = Path(__file__).resolve().parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
+from groove_extractor import extract_muzzle_grooves_pipeline
+WEIGHTS_PATH = Path("/home/adis_mayur/F_CODES/crop11dec.h5")
+PYTHON_EXEC = BASE_DIR / ".venv" / "bin" / "python"
+CROPPER_SCRIPT = BASE_DIR / "muzzle_cropper.py"
+MATCHER_SCRIPT = BASE_DIR / "muzzle_matcher.py"
+OUTPUT_DIR = BASE_DIR / "output"
+UPLOADS_DIR = BASE_DIR / "uploads"
+TEST_SAMPLES_DIR = BASE_DIR / "test_samples"
+FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="Cattle Muzzle AI Detection API", version="1.0.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/api/status")
+async def get_system_status():
+    """Returns detected hardware and model environment information."""
+    has_gpu = False
+    gpu_name = "None"
+    try:
+        # Check nvidia-smi
+        smi = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if smi.returncode == 0 and smi.stdout.strip():
+            gpu_name = smi.stdout.strip().split("\n")[0]
+            has_gpu = True
+    except Exception:
+        pass
+
+    # CPU info (physical cores, logical threads, max cores)
+    logical_cores = os.cpu_count() or 12
+    core_ids = set()
+    for p in glob.glob("/sys/devices/system/cpu/cpu[0-9]*/topology/core_id"):
+        try:
+            with open(p) as f:
+                core_ids.add(f.read().strip())
+        except Exception:
+            pass
+    physical_cores = len(core_ids) if core_ids else (logical_cores // 2 or 6)
+    cpu_model = f"AMD Ryzen 5 5600H ({physical_cores} cores / {logical_cores} threads)"
+
+    # Test samples
+    sample_images = []
+    if TEST_SAMPLES_DIR.exists():
+        sample_images = [f.name for f in sorted(TEST_SAMPLES_DIR.glob("*.jpg"))]
+
+    sample_videos = []
+    # Scan root directory for sample videos
+    root_dir = Path("/home/adis_mayur/F_CODES")
+    for vid in sorted(root_dir.glob("*.mp4")):
+        sample_videos.append({
+            "name": vid.name,
+            "path": str(vid),
+            "size_mb": round(vid.stat().st_size / (1024 * 1024), 2)
+        })
+    # Also check uploads
+    for vid in sorted(UPLOADS_DIR.glob("*.mp4")):
+        sample_videos.append({
+            "name": f"Uploaded: {vid.name.split('_', 1)[-1]}",
+            "path": str(vid),
+            "size_mb": round(vid.stat().st_size / (1024 * 1024), 2)
+        })
+
+    return {
+        "status": "ready",
+        "weights_present": WEIGHTS_PATH.exists(),
+        "weights_path": str(WEIGHTS_PATH),
+        "weights_size_mb": round(WEIGHTS_PATH.stat().st_size / (1024 * 1024), 1) if WEIGHTS_PATH.exists() else 0,
+        "cpu_cores_logical": logical_cores,
+        "cpu_cores_physical": physical_cores,
+        "max_cores": logical_cores,
+        "hardware": {
+            "gpu_available": has_gpu,
+            "gpu_name": gpu_name,
+            "cpu_model": cpu_model,
+            "cpu_threads": logical_cores,
+            "cpu_cores_logical": logical_cores,
+            "cpu_cores_physical": physical_cores,
+            "max_cores": logical_cores,
+        },
+        "sample_images": sample_images,
+        "sample_videos": sample_videos,
+    }
+
+
+@app.post("/api/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """Uploads a video or image file for muzzle cropping."""
+    filename = Path(file.filename).name
+    save_path = UPLOADS_DIR / f"{int(time.time())}_{filename}"
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    is_video = save_path.suffix.lower() in [".mp4", ".avi", ".mov", ".mkv"]
+    return {
+        "success": True,
+        "filename": filename,
+        "path": str(save_path),
+        "is_video": is_video,
+        "size_mb": round(save_path.stat().st_size / (1024 * 1024), 2),
+    }
+
+
+def parse_cpu_cores(cpu_cores: Optional[Any]) -> Optional[int]:
+    """Parses arbitrary user-specified CPU core counts, validating integer >= 1."""
+    if cpu_cores is None:
+        return None
+    val_str = str(cpu_cores).strip()
+    if not val_str or val_str.lower() in ("null", "none", "auto", "all"):
+        return None
+    try:
+        val = int(val_str)
+        return val if val >= 1 else None
+    except (ValueError, TypeError):
+        return None
+
+
+def stream_subprocess_output(cmd: List[str], env_extra: Optional[dict] = None):
+    """Generator streaming stdout/stderr as SSE events."""
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    try:
+        for line in iter(proc.stdout.readline, ""):
+            line_str = line.strip()
+            if not line_str:
+                continue
+
+            if line_str.startswith("[JSON_EVENT]"):
+                json_part = line_str[len("[JSON_EVENT]"):].strip()
+                try:
+                    payload = json.loads(json_part)
+                    p_type = payload.get("type", "")
+
+                    if p_type == "matcher_log":
+                        yield f"data: {json.dumps({'event': 'log', 'line': payload.get('text', '')})}\n\n"
+                    elif p_type == "two_video_result":
+                        res_data = payload.get("result", {})
+                        # Convert paths to URLs
+                        for key in ("video_a", "video_b"):
+                            sub = res_data.get(key, {})
+                            for pkey, ukey in [
+                                ("crop_path", "crop_url"),
+                                ("annotated_path", "annotated_url"),
+                                ("enhanced_path", "enhanced_url"),
+                                ("groove_response_path", "groove_response_url"),
+                                ("groove_mask_path", "groove_mask_url"),
+                                ("groove_skeleton_path", "groove_skeleton_url"),
+                                ("groove_overlay_path", "groove_overlay_url"),
+                            ]:
+                                if pkey in sub and sub[pkey]:
+                                    try:
+                                        sub[ukey] = "/output/" + str(Path(sub[pkey]).relative_to(OUTPUT_DIR))
+                                    except Exception:
+                                        if ukey not in sub or not sub[ukey]:
+                                            sub[ukey] = f"/output/{Path(sub[pkey]).name}"
+                        m = res_data.get("match", {})
+                        if "visual_path" in m and m["visual_path"]:
+                            try:
+                                m["visual_url"] = "/output/" + str(Path(m["visual_path"]).relative_to(OUTPUT_DIR))
+                            except Exception:
+                                m["visual_url"] = m["visual_path"]
+                        yield f"data: {json.dumps({'event': 'two_video_result', 'data': res_data})}\n\n"
+                    else:
+                        # Convert absolute paths to API-relative URLs for frontend
+                        if "annotated_path" in payload and payload["annotated_path"]:
+                            try:
+                                payload["annotated_url"] = "/output/" + str(Path(payload["annotated_path"]).relative_to(OUTPUT_DIR))
+                            except Exception:
+                                pass
+                        if "crops" in payload:
+                            for c in payload["crops"]:
+                                if "crop_path" in c and c["crop_path"]:
+                                    try:
+                                        c["crop_url"] = "/output/" + str(Path(c["crop_path"]).relative_to(OUTPUT_DIR))
+                                    except Exception:
+                                        pass
+                        yield f"data: {json.dumps({'event': 'detection', 'data': payload})}\n\n"
+                except Exception as ex:
+                    yield f"data: {json.dumps({'event': 'log', 'line': line_str})}\n\n"
+            else:
+                yield f"data: {json.dumps({'event': 'log', 'line': line_str})}\n\n"
+
+        proc.stdout.close()
+        returncode = proc.wait()
+        yield f"data: {json.dumps({'event': 'done', 'returncode': returncode})}\n\n"
+    except GeneratorExit:
+        proc.kill()
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+    except Exception as e:
+        proc.kill()
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+        yield f"data: {json.dumps({'event': 'error', 'error': str(e)})}\n\n"
+
+
+@app.get("/api/stream-video")
+async def stream_video(
+    video_path: str = Query(...),
+    device: str = Query("auto"),
+    cpu_cores: Optional[str] = Query(None),
+    frame_interval: int = Query(5),
+    max_frames: Optional[int] = Query(10),
+    confidence: float = Query(0.70),
+    square: bool = Query(True),
+    resize: int = Query(224),
+    fast_mode: Optional[bool] = Query(None),
+):
+    """Processes a video file and streams frame crops and logs over SSE."""
+    if not os.path.exists(video_path):
+        raise HTTPException(status_code=404, detail="Video file not found")
+
+    job_output_dir = OUTPUT_DIR / f"run_video_{int(time.time())}"
+    job_output_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        str(PYTHON_EXEC),
+        str(CROPPER_SCRIPT),
+        "--weights", str(WEIGHTS_PATH),
+        "--video", video_path,
+        "--output-dir", str(job_output_dir),
+        "--device", device,
+        "--frame-interval", str(frame_interval),
+        "--confidence", str(confidence),
+        "--resize", str(resize),
+        "--json-stream",
+    ]
+    parsed_cores = parse_cpu_cores(cpu_cores)
+    env_extra = {}
+    if parsed_cores is not None:
+        cmd.extend(["--cpu-cores", str(parsed_cores)])
+        env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
+        env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
+
+    if max_frames is not None and max_frames > 0:
+        cmd.extend(["--max-frames", str(max_frames)])
+    if square:
+        cmd.append("--square")
+    if fast_mode is True:
+        cmd.append("--fast-mode")
+    elif fast_mode is False:
+        cmd.append("--no-fast-mode")
+
+    return StreamingResponse(stream_subprocess_output(cmd, env_extra=env_extra), media_type="text/event-stream")
+
+
+@app.get("/api/stream-image")
+async def stream_image(
+    image_path: str = Query(...),
+    device: str = Query("auto"),
+    cpu_cores: Optional[str] = Query(None),
+    confidence: float = Query(0.70),
+    square: bool = Query(True),
+    resize: int = Query(224),
+    fast_mode: Optional[bool] = Query(None),
+):
+    """Processes an image file and streams results and logs over SSE."""
+    if not os.path.exists(image_path):
+        # Check test_samples
+        sample_path = TEST_SAMPLES_DIR / image_path
+        if sample_path.exists():
+            image_path = str(sample_path)
+        else:
+            raise HTTPException(status_code=404, detail="Image file not found")
+
+    job_output_dir = OUTPUT_DIR / f"run_img_{int(time.time())}"
+    job_output_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        str(PYTHON_EXEC),
+        str(CROPPER_SCRIPT),
+        "--weights", str(WEIGHTS_PATH),
+        "--input", image_path,
+        "--output-dir", str(job_output_dir),
+        "--device", device,
+        "--confidence", str(confidence),
+        "--resize", str(resize),
+        "--json-stream",
+    ]
+    parsed_cores = parse_cpu_cores(cpu_cores)
+    env_extra = {}
+    if parsed_cores is not None:
+        cmd.extend(["--cpu-cores", str(parsed_cores)])
+        env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
+        env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
+
+    if square:
+        cmd.append("--square")
+    if fast_mode is True:
+        cmd.append("--fast-mode")
+    elif fast_mode is False:
+        cmd.append("--no-fast-mode")
+
+    return StreamingResponse(stream_subprocess_output(cmd, env_extra=env_extra), media_type="text/event-stream")
+
+
+@app.get("/api/stream-benchmark")
+async def stream_benchmark(max_images: int = Query(2)):
+    """Runs comparative hardware benchmark and streams logs & results."""
+    cmd = [
+        str(PYTHON_EXEC),
+        str(CROPPER_SCRIPT),
+        "--weights", str(WEIGHTS_PATH),
+        "--benchmark",
+        "--max-images", str(max_images),
+        "--json-stream",
+    ]
+    return StreamingResponse(stream_subprocess_output(cmd), media_type="text/event-stream")
+
+
+def resolve_video_path(v_path: str) -> Path:
+    p = Path(v_path)
+    if p.exists():
+        return p.resolve()
+    cand_root = Path("/home/adis_mayur/F_CODES") / v_path
+    if cand_root.exists():
+        return cand_root.resolve()
+    cand_upload = UPLOADS_DIR / v_path
+    if cand_upload.exists():
+        return cand_upload.resolve()
+    return p
+
+
+@app.get("/api/stream-compare-videos")
+async def stream_compare_videos(
+    video_a: str = Query(...),
+    video_b: str = Query(...),
+    device: str = Query("gpu"),
+    cpu_cores: Optional[str] = Query(None),
+    upscale: str = Query("lanczos4"),
+    scale: int = Query(2),
+    threshold: int = Query(35),
+    interval: int = Query(10),
+    max_frames: int = Query(8),
+    fast_mode: bool = Query(True),
+):
+    """Compares two cattle videos using Mask R-CNN crop + Lanczos-4 upscale + ORB matcher."""
+    resolved_a = resolve_video_path(video_a)
+    resolved_b = resolve_video_path(video_b)
+
+    if not resolved_a.exists():
+        raise HTTPException(status_code=404, detail=f"Video A file not found: {video_a}")
+    if not resolved_b.exists():
+        raise HTTPException(status_code=404, detail=f"Video B file not found: {video_b}")
+
+    job_output_dir = OUTPUT_DIR / f"run_compare_{int(time.time()*1000)}"
+    job_output_dir.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        str(PYTHON_EXEC),
+        str(MATCHER_SCRIPT),
+        "--weights", str(WEIGHTS_PATH),
+        "--video-a", str(resolved_a),
+        "--video-b", str(resolved_b),
+        "--output-dir", str(job_output_dir),
+        "--device", device,
+        "--upscale", upscale,
+        "--scale", str(scale),
+        "--threshold", str(threshold),
+        "--interval", str(interval),
+        "--max-frames", str(max_frames),
+        "--json-stream",
+    ]
+    if fast_mode:
+        cmd.append("--fast-mode")
+    else:
+        cmd.append("--no-fast-mode")
+
+    parsed_cores = parse_cpu_cores(cpu_cores)
+    env_extra = {}
+    if parsed_cores is not None:
+        cmd.extend(["--cpu-cores", str(parsed_cores)])
+        env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
+        env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
+
+    return StreamingResponse(stream_subprocess_output(cmd, env_extra=env_extra), media_type="text/event-stream")
+
+
+def resolve_image_path(img_path: str) -> Optional[Path]:
+    """
+    Resolves an image or mask path across absolute paths, output directory,
+    test_samples, uploads, and workspace directories.
+    """
+    if not img_path or not str(img_path).strip():
+        return None
+    p = Path(img_path)
+    if p.is_file():
+        return p.resolve()
+
+    clean_p = str(img_path).strip().lstrip("/")
+    # Check /output/... or output/...
+    if clean_p.startswith("output/"):
+        rel = clean_p[len("output/"):]
+        cand = OUTPUT_DIR / rel
+        if cand.is_file():
+            return cand.resolve()
+
+    # Check /test_samples/... or test_samples/...
+    if clean_p.startswith("test_samples/"):
+        rel = clean_p[len("test_samples/"):]
+        cand = TEST_SAMPLES_DIR / rel
+        if cand.is_file():
+            return cand.resolve()
+
+    # Check /uploads/... or uploads/...
+    if clean_p.startswith("uploads/"):
+        rel = clean_p[len("uploads/"):]
+        cand = UPLOADS_DIR / rel
+        if cand.is_file():
+            return cand.resolve()
+
+    # Check relative to OUTPUT_DIR
+    cand = OUTPUT_DIR / clean_p
+    if cand.is_file():
+        return cand.resolve()
+
+    # Check relative to BASE_DIR
+    cand = BASE_DIR / clean_p
+    if cand.is_file():
+        return cand.resolve()
+
+    # Check relative to TEST_SAMPLES_DIR
+    cand = TEST_SAMPLES_DIR / clean_p
+    if cand.is_file():
+        return cand.resolve()
+
+    # Check relative to UPLOADS_DIR
+    cand = UPLOADS_DIR / clean_p
+    if cand.is_file():
+        return cand.resolve()
+
+    # Check relative to /home/adis_mayur/F_CODES
+    cand = Path("/home/adis_mayur/F_CODES") / clean_p
+    if cand.is_file():
+        return cand.resolve()
+
+    return None
+
+
+class GrooveTuneRequest(BaseModel):
+    image_path: str
+    mask_path: Optional[str] = None
+    method: str = "blackhat"
+    scales: List[int] = Field(default_factory=lambda: [9, 15, 21])
+    threshold_method: str = "otsu"
+    min_component_size: int = 15
+    skeleton_enabled: bool = True
+
+
+@app.post("/api/grooves/tune")
+async def tune_grooves(req: GrooveTuneRequest):
+    """
+    Dedicated interactive tuning endpoint for cattle muzzle dark groove extraction & skeletonization.
+    Allows real-time tuning of morphology method, scales, binarization, and noise pruning.
+    """
+    # 1. Parameter Validation
+    method_clean = req.method.strip().lower()
+    if method_clean not in ("blackhat", "frangi"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid method '{req.method}'. Supported methods: 'blackhat', 'frangi'.",
+        )
+
+    thresh_clean = req.threshold_method.strip().lower()
+    if thresh_clean not in ("otsu", "adaptive"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid threshold_method '{req.threshold_method}'. Supported methods: 'otsu', 'adaptive'.",
+        )
+
+    if not req.scales or not isinstance(req.scales, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Parameter 'scales' must be a non-empty list of integers (e.g. [9, 15, 21]).",
+        )
+
+    for s in req.scales:
+        if not isinstance(s, int) or s < 1:
+            raise HTTPException(
+                status_code=400,
+                detail=f"All scales must be positive integers >= 1, got {s}.",
+            )
+
+    if req.min_component_size < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"min_component_size must be >= 0, got {req.min_component_size}.",
+        )
+
+    # 2. Resolve image
+    resolved_img_path = resolve_image_path(req.image_path)
+    if not resolved_img_path or not resolved_img_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Image file not found at: '{req.image_path}'. Ensure file exists in output or test_samples.",
+        )
+
+    image_bgr = cv2.imread(str(resolved_img_path))
+    if image_bgr is None or image_bgr.size == 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not decode image at '{req.image_path}'. File may be corrupt or not an image.",
+        )
+
+    # 3. Resolve mask (if provided)
+    mask = None
+    if req.mask_path:
+        resolved_mask_path = resolve_image_path(req.mask_path)
+        if not resolved_mask_path or not resolved_mask_path.is_file():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Mask file not found at: '{req.mask_path}'.",
+            )
+        mask = cv2.imread(str(resolved_mask_path), cv2.IMREAD_GRAYSCALE)
+        if mask is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Could not decode mask file at '{req.mask_path}'.",
+            )
+        # Ensure dimensions match image
+        if mask.shape[:2] != image_bgr.shape[:2]:
+            mask = cv2.resize(
+                mask,
+                (image_bgr.shape[1], image_bgr.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            )
+
+    # 4. Create unique output directory for this tune run
+    tune_id = f"tune_{int(time.time() * 1000)}"
+    tune_dir = OUTPUT_DIR / tune_id
+    tune_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Run extraction pipeline
+        result = extract_muzzle_grooves_pipeline(
+            image_bgr=image_bgr,
+            mask=mask,
+            method=method_clean,
+            scales=req.scales,
+            threshold_method=thresh_clean,
+            min_component_size=req.min_component_size,
+            exclude_nostrils=True,
+            output_dir=None,
+        )
+
+        resp_img = result["enhanced_response"]
+        groove_mask_img = result["groove_mask"]
+
+        if req.skeleton_enabled:
+            skel_img = result["groove_skeleton"]
+            overlay_img = result["groove_overlay"]
+            skel_pixel_count = int(result["num_skeleton_pixels"])
+        else:
+            skel_img = np.zeros_like(groove_mask_img)
+            overlay_img = image_bgr.copy()
+            skel_pixel_count = 0
+
+        p_resp = tune_dir / "groove_response.png"
+        p_mask = tune_dir / "groove_mask.png"
+        p_skel = tune_dir / "groove_skeleton.png"
+        p_over = tune_dir / "groove_overlay.jpg"
+
+        cv2.imwrite(str(p_resp), resp_img)
+        cv2.imwrite(str(p_mask), groove_mask_img)
+        cv2.imwrite(str(p_skel), skel_img)
+        cv2.imwrite(str(p_over), overlay_img)
+
+        h_orig, w_orig = image_bgr.shape[:2]
+
+        return {
+            "success": True,
+            "groove_response_url": f"/output/{tune_id}/groove_response.png",
+            "groove_mask_url": f"/output/{tune_id}/groove_mask.png",
+            "groove_skeleton_url": f"/output/{tune_id}/groove_skeleton.png",
+            "groove_overlay_url": f"/output/{tune_id}/groove_overlay.jpg",
+            "timings": {
+                "total_ms": round(result["timing_ms"], 2),
+            },
+            "resolution": f"{w_orig}x{h_orig}",
+            "groove_pixel_count": int(result["num_groove_pixels"]),
+            "skeleton_pixel_count": skel_pixel_count,
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Groove tuning pipeline execution failed: {str(e)}",
+        )
+
+
+@app.get("/api/grooves/sample-result")
+async def get_sample_groove_result():
+    """Returns pre-computed groove extraction for instant UI preview."""
+    summary_path = OUTPUT_DIR / "grooves_muzzleVideo" / "00_groove_5stages_summary.jpg"
+    native_path = OUTPUT_DIR / "grooves_muzzleVideo" / "01_native_muzzle_crop.jpg"
+    if summary_path.exists() and native_path.exists():
+        return {
+            "success": True,
+            "video_name": "muzzleVideo.mp4",
+            "frame_idx": 0,
+            "confidence": 0.998,
+            "quality": {"composite": 61.3, "sharpness": 172.5},
+            "resolution": "392x392",
+            "method": "blackhat",
+            "scales": [9, 15, 21],
+            "threshold_method": "otsu",
+            "min_component_size": 15,
+            "groove_pixel_count": 9497,
+            "skeleton_pixel_count": 2815,
+            "groove_coverage_pct": 22.36,
+            "crop_path": str(native_path),
+            "artifacts": {
+                "summary_panel": "/output/grooves_muzzleVideo/00_groove_5stages_summary.jpg",
+                "native_crop": "/output/grooves_muzzleVideo/01_native_muzzle_crop.jpg",
+                "enhanced_ridge": "/output/grooves_muzzleVideo/02_lanczos_clahe_ridge.jpg",
+                "groove_response": "/output/grooves_muzzleVideo/groove_response.png",
+                "groove_mask": "/output/grooves_muzzleVideo/groove_mask.png",
+                "groove_skeleton": "/output/grooves_muzzleVideo/groove_skeleton.png",
+                "groove_overlay": "/output/grooves_muzzleVideo/groove_overlay.png",
+            },
+        }
+    raise HTTPException(status_code=404, detail="No precomputed sample result found.")
+
+
+class ProcessVideoGroovesRequest(BaseModel):
+    video_path: str
+    method: str = "blackhat"
+    scales: List[int] = Field(default_factory=lambda: [9, 15, 21])
+    threshold_method: str = "otsu"
+    min_component_size: int = 15
+
+
+@app.post("/api/grooves/process-video")
+async def process_video_grooves_endpoint(req: ProcessVideoGroovesRequest):
+    """Processes a cattle video end-to-end to extract muzzle grooves and skeletons."""
+    resolved_v = resolve_video_path(req.video_path)
+    if not resolved_v or not resolved_v.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
+
+    import asyncio
+    from functools import partial
+    from process_video_grooves import process_video_grooves
+
+    loop = asyncio.get_event_loop()
+    fn = partial(
+        process_video_grooves,
+        video_path=str(resolved_v),
+        method=req.method,
+        scales=req.scales,
+        threshold_method=req.threshold_method,
+        min_component_size=req.min_component_size,
+    )
+    try:
+        res = await loop.run_in_executor(None, fn)
+        stem = resolved_v.stem
+        rel_dir = f"grooves_{stem}"
+        res["artifacts"] = {
+            k: f"/output/{rel_dir}/{Path(v).name}"
+            for k, v in res["artifacts"].items()
+        }
+        res["crop_path"] = str(OUTPUT_DIR / rel_dir / "01_native_muzzle_crop.jpg")
+        res["success"] = True
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Video processing failed: {str(e)}")
+
+
+# Static file serving
+app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
+app.mount("/test_samples", StaticFiles(directory=str(TEST_SAMPLES_DIR)), name="test_samples")
+
+if FRONTEND_DIST.exists():
+    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        file_path = FRONTEND_DIST / full_path
+        if file_path.is_file():
+            return FileResponse(file_path)
+        return FileResponse(FRONTEND_DIST / "index.html")
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("server:app", host="0.0.0.0", port=8000, reload=False)
