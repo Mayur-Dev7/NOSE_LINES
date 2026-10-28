@@ -675,6 +675,10 @@ def extract_five_muzzle_stages(
             param_lists[k].append(params[k])
 
         rel_base = f"/output/video_five_frames/{cache_dir.name}"
+        # Backend-only spatial feature arrays are held by the server's LRU cache.
+        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
+        matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
+        matcher_gray = enhanced_gray.copy()
         frames_records.append({
             "frame_number": i + 1,
             "frame_idx": f_idx,
@@ -695,6 +699,11 @@ def extract_five_muzzle_stages(
             "skeleton_path": str(p_skel),
             "overlay_path": str(p_over),
             "parameters": params,
+            "clahe_gray": matcher_gray,
+            "mask": matcher_mask,
+            "skeleton": matcher_skeleton,
+            "alignment_method": "legacy_align_muzzle_canonical",
+            "rotation_deg": round(float(angle_deg), 2),
             "minutiae": minutiae,
         })
         log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae")
