@@ -1020,22 +1020,22 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
     try:
         async with _EXTRACTION_LOCK:
             res = await asyncio.to_thread(fn)
-            key = _spatial_cache_key(
-                resolved_v,
-                req.method or "frangi",
-                req.threshold_method or "adaptive",
-                int(req.adaptive_block_size or 15),
-                int(req.adaptive_c or 2),
-                bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
-                int(getattr(req, "min_spur_length", 8) or 8),
-                int(getattr(req, "min_component_size", 30) or 30),
-                req.device or "cpu",
-                int(req.cpu_cores or 6),
-            )
-            _put_extraction_cache(key, res.get("frames") or [])
-            safe = dict(res)
-            safe["frames"] = [_json_safe_frame(frame) for frame in (res.get("frames") or [])]
-            return safe
+        key = _spatial_cache_key(
+            resolved_v,
+            req.method or "frangi",
+            req.threshold_method or "adaptive",
+            int(req.adaptive_block_size or 15),
+            int(req.adaptive_c or 2),
+            bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+            int(req.min_spur_length or 8),
+            int(req.min_component_size or 30),
+            req.device or "cpu",
+            int(req.cpu_cores or 6),
+        )
+        _put_extraction_cache(key, res.get("frames") or [])
+        safe = dict(res)
+        safe["frames"] = [_json_safe_frame(frame) for frame in (res.get("frames") or [])]
+        return safe
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"5-Frame extraction failed: {str(e)}")
 
