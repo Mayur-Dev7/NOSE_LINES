@@ -989,6 +989,48 @@ class CosineSimilarityRequest(BaseModel):
 _EXTRACTION_LOCK = asyncio.Lock()
 
 
+def _json_safe_frame(frame):
+    return {k: v for k, v in frame.items() if not isinstance(v, np.ndarray)}
+
+
+def _spatial_cache_key(video_path, method, threshold_method, adaptive_block_size, adaptive_c,
+                       exclude_nostrils, min_spur_length, min_component_size, device, cpu_cores):
+    stat = Path(video_path).stat()
+    signature = f"{Path(video_path).resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{method}:{threshold_method}:{adaptive_block_size}:{adaptive_c}:{exclude_nostrils}:{min_spur_length}:{min_component_size}:{device}:{cpu_cores}"
+    return hashlib.sha256(signature.encode("utf-8")).hexdigest()
+
+
+def _put_extraction_cache(key, frames):
+    _EXTRACTION_CACHE[key] = frames
+    _EXTRACTION_CACHE.move_to_end(key)
+    while len(_EXTRACTION_CACHE) > _EXTRACTION_CACHE_MAX:
+        _EXTRACTION_CACHE.popitem(last=False)
+
+
+def _get_extraction_cache(key):
+    frames = _EXTRACTION_CACHE.get(key)
+    if frames is not None:
+        _EXTRACTION_CACHE.move_to_end(key)
+    return frames
+
+
+def _extract_video_for_spatial_match(video_path, req):
+    """Synchronous extraction helper; caller controls the extraction lock."""
+    return extract_five_frames_groove_features(
+        video_path=str(video_path),
+        method=req.filter_method or "frangi",
+        threshold_method=req.threshold_method or "adaptive",
+        adaptive_block_size=int(req.adaptive_block_size or 15),
+        adaptive_c=int(req.adaptive_c or 2),
+        exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
+        device=req.device or "cpu",
+        cpu_cores=int(req.cpu_cores or 6),
+        min_spur_length=int(req.min_spur_length or 8),
+        min_component_size=int(req.min_component_size or 30),
+    )
+
+
+
 @app.post("/api/video/extract-five-muzzle-parameters")
 async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
     """
@@ -1082,47 +1124,6 @@ import hashlib
 
 _EXTRACTION_CACHE = OrderedDict()
 _EXTRACTION_CACHE_MAX = 8
-
-
-def _json_safe_frame(frame):
-    return {k: v for k, v in frame.items() if not isinstance(v, np.ndarray)}
-
-
-def _spatial_cache_key(video_path, method, threshold_method, adaptive_block_size, adaptive_c,
-                       exclude_nostrils, min_spur_length, min_component_size, device, cpu_cores):
-    stat = Path(video_path).stat()
-    signature = f"{Path(video_path).resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{method}:{threshold_method}:{adaptive_block_size}:{adaptive_c}:{exclude_nostrils}:{min_spur_length}:{min_component_size}:{device}:{cpu_cores}"
-    return hashlib.sha256(signature.encode("utf-8")).hexdigest()
-
-
-def _put_extraction_cache(key, frames):
-    _EXTRACTION_CACHE[key] = frames
-    _EXTRACTION_CACHE.move_to_end(key)
-    while len(_EXTRACTION_CACHE) > _EXTRACTION_CACHE_MAX:
-        _EXTRACTION_CACHE.popitem(last=False)
-
-
-def _get_extraction_cache(key):
-    frames = _EXTRACTION_CACHE.get(key)
-    if frames is not None:
-        _EXTRACTION_CACHE.move_to_end(key)
-    return frames
-
-
-def _extract_video_for_spatial_match(video_path, req):
-    """Synchronous extraction helper; caller controls the extraction lock."""
-    return extract_five_frames_groove_features(
-        video_path=str(video_path),
-        method=req.filter_method or "frangi",
-        threshold_method=req.threshold_method or "adaptive",
-        adaptive_block_size=int(req.adaptive_block_size or 15),
-        adaptive_c=int(req.adaptive_c or 2),
-        exclude_nostrils=bool(req.exclude_nostrils if req.exclude_nostrils is not None else True),
-        device=req.device or "cpu",
-        cpu_cores=int(req.cpu_cores or 6),
-        min_spur_length=int(req.min_spur_length or 8),
-        min_component_size=int(req.min_component_size or 30),
-    )
 
 
 @app.get("/api/video/match-config")
