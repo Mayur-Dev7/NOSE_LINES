@@ -194,3 +194,95 @@ The backend exposes an interactive tuning endpoint that runs in ~11–15 ms with
 | `exclude_nostrils` | `True` | `True`, `False` | Detect and exclude dark breathing cavity regions |
 | `use_clahe` | `True` | `True`, `False` | Apply local adaptive contrast enhancement before filtering |
 | `clahe_clip_limit` | `2.0` | `1.0` – `5.0` | CLAHE clipping limit to prevent over-amplifying noise |
+
+---
+
+## 8. Multi-Image Biometric Reference Template Architecture
+
+The system extends the 5-stage image pipeline to accept up to five images of the same cattle muzzle and generate one consolidated biometric reference template. Rather than calculating simple averages, the system accounts for image quality, orientation/pose variations, and near-duplicate views to produce a robust multi-image representation suitable for subsequent muzzle comparisons.
+
+```mermaid
+flowchart TD
+    A["Batch of 1–5 Muzzle Images"] --> B["Quality Assessment & Gatekeeper"]
+    B --> C["Near-Duplicate View Detection (NCC)"]
+    C --> D["5-Stage Groove Extraction & Thin Skeleton"]
+    D --> E["Groove Graph & Topological Feature Tracing"]
+    E --> F["Spatial Alignment Feasibility Check"]
+    F --> G["Consensus Statistics (Median, MAD, Stability)"]
+    G --> H["Recurring Graph Structure Discovery (>=50% recurrence)"]
+    H --> I["Canonical Biometric Reference Template (v1.0)"]
+    I --> J["Storage, Export (JSON & CSVs), and 1:1 Matcher"]
+```
+
+### Key Components
+
+1. **Batch Ingestion & Quality Assessment (`batch_processor.py`)**:
+   - Ingests up to 5 images per cow (configurable for smaller batches).
+   - Computes Focus Sharpness (Laplacian variance), Exposure Clipping (ratio $< 10$ and $> 245$), Contrast (pixel intensity std dev), and Muzzle Region Area.
+   - Detects multi-border crop truncation contacts.
+   - Filters unusable images ($Q < 50.0$) with transparent rejection reasons (`"severe_blur"`, `"underexposed"`, `"overexposed"`, `"insufficient_area"`, `"truncated_crop"`).
+   - Identifies near-duplicate frames via zero-mean Normalized Cross-Correlation (NCC $\ge 0.92$) on downsampled 64×64 intensity profiles, downweighting repeated views to prevent false confidence.
+
+2. **Topological Groove Graph Extraction (`groove_graph.py`)**:
+   - Computes 8-connectivity pixel degrees using 3×3 convolution filtering.
+   - Clusters contiguous junction pixels into single nodes with sub-pixel floating centroids.
+   - Traces 8-connected branch paths between nodes, extracting geodesic curve length, Euclidean chord length, tortuosity/curvature, orientation angles $[0^\circ, 180^\circ)$, and midpoints.
+   - Computes global topological invariants: Endpoints, Clustered Junctions, Branch Count, Connected Components, Cycle Basis Count, and Euler Characteristic ($V - E$).
+   - Generates non-destructive visual overlay with colored branch paths, endpoints, and junction markers.
+
+3. **Consensus Aggregation & Spatial Alignment (`template_consensus.py`)**:
+   - Filters usable & independent records.
+   - Evaluates spatial registration feasibility via pairwise centroid offsets $\Delta c_{ij}$ and principal inertia axis deltas $\Delta \theta_{ij}$.
+   - Computes robust sample Median and Median Absolute Deviation (MAD) for each descriptor:
+     $$\text{MAD} = \text{median}(|x_i - \tilde{x}|)$$
+   - Computes stability index $S \in [0, 1]$:
+     $$S = \frac{1}{1 + \frac{\text{MAD}}{|\tilde{x}| + 10^{-6}}}$$
+     - Stable: $S \ge 0.80$
+     - Moderate: $0.65 \le S < 0.80$
+     - Variable / Low: $S < 0.65$
+   - Identifies recurring graph structures observed in $\ge 50\%$ of usable images ($k \ge 2$).
+   - Determines overall template confidence level (`"high"`, `"moderate"`, `"low"`, `"insufficient_data"`).
+
+4. **Reference Template Storage & Matcher (`template_matcher.py`)**:
+   - Saves/loads canonical templates conforming to `SCHEMA_VERSION = "1.0"`.
+   - Compares two reference templates:
+     - Global descriptor similarity normalized by pooled MAD: $z_i = \frac{|\text{med}_A - \text{med}_B|}{\text{mad}_A + \text{mad}_B + 10^{-4}}$, $s_i = \exp(-0.5 \cdot z_i)$.
+     - Recurring structure similarity via bipartite nearest-neighbor matching in normalized coordinate space ($\text{dist} \le 0.15$, $\Delta \theta \le 35^\circ$).
+     - Weighted composite biometric match score (60% Global Descriptors + 40% Recurring Structures).
+     - Biometric verdict: `"MATCH (Same Cattle Candidate)"` vs `"DISTINCT (Different Animals)"` with forensic disclaimers.
+
+5. **Export Engine (`template_exporter.py`)**:
+   - Formatted canonical JSON export (`output/templates/{id}/{id}.json`).
+   - Per-image measurements CSV (`{id}_per_image_measurements.csv`).
+   - Consolidated consensus summary CSV (`{id}_consensus_summary.csv`).
+
+---
+
+## 9. API Reference: Multi-Image Reference Templates
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/template/build-from-batch` | Ingests up to 5 images, runs 5-stage pipeline, extracts graphs, computes consensus, and saves template |
+| `GET` | `/api/template/sample-batch` | Returns pre-computed or on-demand 5-image reference template for instant UI display |
+| `POST` | `/api/template/save` | Saves reference template JSON to storage directory |
+| `GET` | `/api/template/list` | Lists stored reference templates with metadata summaries |
+| `POST` | `/api/template/compare` | Compares two reference templates and returns statistical biometric match verdict |
+| `GET` | `/api/template/export/json/{id}` | Downloads canonical JSON template |
+| `GET` | `/api/template/export/csv/{type}/{id}` | Downloads CSV reports (`measurements` or `consensus`) |
+
+---
+
+## 10. Test Suite Verification
+
+Run the full pytest suite in the local virtual environment:
+```bash
+cd /home/adis_mayur/F_CODES/nose_lines
+.venv/bin/pytest tests/ -v
+```
+All **89 unit and integration tests** pass with 100% success rate:
+- `tests/test_batch_processor.py` (13 tests)
+- `tests/test_groove_extractor.py` (26 tests)
+- `tests/test_groove_graph.py` (10 tests)
+- `tests/test_template_consensus.py` (10 tests)
+- `tests/test_template_matcher.py` (13 tests)
+- `tests/test_multi_image_template.py` (17 tests covering all 14 required multi-image scenarios)

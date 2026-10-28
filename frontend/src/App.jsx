@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import GrooveStudioTab from './GrooveStudioTab';
 import GrooveTuningSection from './GrooveTuningSection';
+import MultiImageTemplateBuilder from './MultiImageTemplateBuilder';
 import {
   Cpu,
   Zap,
@@ -581,6 +582,24 @@ export default function App() {
               </span>
             </button>
 
+            {/* Tab: Multi-Image Reference Builder */}
+            <button
+              onClick={() => setActiveTab('multi_template')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                activeTab === 'multi_template'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/25 ring-1 ring-emerald-400'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Multi-Image Reference Builder</span>
+              <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                activeTab === 'multi_template' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              }`}>
+                5-Image Consensus
+              </span>
+            </button>
+
             {/* Tab 2: 2-Video Comparison */}
             <button
               onClick={() => setActiveTab('two_video')}
@@ -632,6 +651,13 @@ export default function App() {
         {/* ========================================================= */}
         {activeTab === 'groove_studio' && (
           <GrooveStudioTab sampleVideos={status?.sample_videos || []} />
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB: MULTI-IMAGE REFERENCE BUILDER                         */}
+        {/* ========================================================= */}
+        {activeTab === 'multi_template' && (
+          <MultiImageTemplateBuilder sampleVideos={status?.sample_videos} />
         )}
 
         {/* ========================================================= */}
