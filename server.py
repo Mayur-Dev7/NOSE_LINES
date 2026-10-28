@@ -49,6 +49,10 @@ from template_exporter import (
     export_per_image_measurements_csv,
     export_template_json,
 )
+from video_groove_extractor import (
+    extract_five_frames_groove_features,
+    compute_cosine_similarity,
+)
 WEIGHTS_PATH = Path("/home/adis_mayur/F_CODES/crop11dec.h5")
 PYTHON_EXEC = BASE_DIR / ".venv" / "bin" / "python"
 CROPPER_SCRIPT = BASE_DIR / "muzzle_cropper.py"
@@ -951,6 +955,58 @@ async def export_template_csv_endpoint(export_type: str, template_id: str):
     if not file_p.exists():
         raise HTTPException(status_code=404, detail=f"CSV file {fname} not found for template {template_id}")
     return FileResponse(file_p, media_type="text/csv", filename=f"{template_id}_{fname}")
+
+
+# =====================================================================
+# 2-VIDEO 5-FRAME GROOVE PARAMETERS & COSINE SIMILARITY ENDPOINTS
+# =====================================================================
+
+class ExtractVideoFiveFramesRequest(BaseModel):
+    video_path: str
+    force_recompute: Optional[bool] = False
+
+
+class CosineSimilarityRequest(BaseModel):
+    vector_a: List[float]
+    vector_b: List[float]
+
+
+@app.post("/api/video/extract-five-muzzle-parameters")
+async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
+    """
+    Extracts 5 muzzle images from video, extracts groove lines & skeletons,
+    and returns 10 topological parameters per image plus consolidated vector.
+    """
+    resolved_v = resolve_video_path(req.video_path)
+    if not resolved_v or not resolved_v.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
+
+    import asyncio
+    from functools import partial
+
+    loop = asyncio.get_event_loop()
+    fn = partial(
+        extract_five_frames_groove_features,
+        video_path=str(resolved_v),
+        force_recompute=req.force_recompute or False,
+    )
+    try:
+        res = await loop.run_in_executor(None, fn)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"5-Frame extraction failed: {str(e)}")
+
+
+@app.post("/api/video/cosine-similarity")
+async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
+    """
+    Computes Cosine Similarity between two 10-D muzzle feature vectors.
+    """
+    try:
+        res = compute_cosine_similarity(req.vector_a, req.vector_b)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cosine similarity calculation failed: {str(e)}")
 
 
 # Static file serving

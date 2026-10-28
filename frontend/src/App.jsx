@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import GrooveStudioTab from './GrooveStudioTab';
 import GrooveTuningSection from './GrooveTuningSection';
 import MultiImageTemplateBuilder from './MultiImageTemplateBuilder';
+import TwoVideoCosineMatcher from './TwoVideoCosineMatcher';
 import {
   Cpu,
   Zap,
@@ -62,8 +63,8 @@ const CPU_PRESETS = [
 ];
 
 export default function App() {
-  // Navigation: 'groove_studio' (prominent default for nose_lines), 'two_video', 'viewer', 'benchmark'
-  const [activeTab, setActiveTab] = useState('groove_studio');
+  // Navigation: 'two_video_cosine' (default 2-video 5-image cosine matcher), 'groove_studio', 'multi_template', 'two_video', 'viewer', 'benchmark'
+  const [activeTab, setActiveTab] = useState('two_video_cosine');
 
   // System status
   const [status, setStatus] = useState(null);
@@ -564,7 +565,25 @@ export default function App() {
         {/* Navigation Tabs */}
         <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            {/* Primary Tab: Groove Extraction Studio (nose_lines) */}
+            {/* Primary Default Tab: 2-Video Cosine Matcher (nose_lines LocalStorage) */}
+            <button
+              onClick={() => setActiveTab('two_video_cosine')}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+                activeTab === 'two_video_cosine'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/25 ring-1 ring-emerald-400'
+                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+              }`}
+            >
+              <GitCompare className="w-4 h-4" />
+              <span>2-Video Cosine Matcher</span>
+              <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                activeTab === 'two_video_cosine' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              }`}>
+                5-Images &bull; LocalStorage
+              </span>
+            </button>
+
+            {/* Groove Extraction Studio (nose_lines) */}
             <button
               onClick={() => setActiveTab('groove_studio')}
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
@@ -647,7 +666,14 @@ export default function App() {
         </div>
 
         {/* ========================================================= */}
-        {/* PRIMARY TAB: GROOVE EXTRACTION STUDIO (NOSE_LINES)       */}
+        {/* PRIMARY TAB: 2-VIDEO 5-IMAGE COSINE MATCHER               */}
+        {/* ========================================================= */}
+        {activeTab === 'two_video_cosine' && (
+          <TwoVideoCosineMatcher sampleVideos={status?.sample_videos || []} />
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB: GROOVE EXTRACTION STUDIO (NOSE_LINES)                */}
         {/* ========================================================= */}
         {activeTab === 'groove_studio' && (
           <GrooveStudioTab sampleVideos={status?.sample_videos || []} />
