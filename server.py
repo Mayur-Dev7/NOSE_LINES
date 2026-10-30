@@ -12,6 +12,9 @@ Provides REST and Server-Sent Event (SSE) endpoints for:
 
 import os
 import sys
+
+# Prevent muzzle_cropper from re-executing server process via execve
+os.environ["MRCNN_NVIDIA_CONFIGURED"] = "1"
 import glob
 import json
 import time

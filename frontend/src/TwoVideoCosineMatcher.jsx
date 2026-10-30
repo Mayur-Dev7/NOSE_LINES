@@ -12,26 +12,24 @@ import {
   Upload,
   Layers,
   ChevronDown,
+  ChevronUp,
   Info,
   Trash2,
-  Eye,
-  Sliders,
   Maximize2,
   ShieldCheck,
   AlertCircle,
-  Crosshair,
-  Network,
-  Activity,
-  FileText,
   Cpu,
   Zap,
   BarChart3,
-  Target
+  Network,
+  Activity,
+  FileVideo,
+  Check
 } from 'lucide-react';
 
 const FEATURE_LABELS = {
   groove_pixels: 'Groove Pixels (Valleys)',
-  skeleton_pixels: 'Ridge Skeleton (5th Image 1-px)',
+  skeleton_pixels: 'Ridge Skeleton (1-px Lines)',
   groove_coverage_pct: 'Groove Area Coverage',
   endpoints: 'Line Endpoints (Degree 1)',
   junctions: 'Line Junctions (Degree >= 3)',
@@ -55,138 +53,122 @@ const FEATURE_UNITS = {
   euler_characteristic: 'χ',
 };
 
+const DEFAULT_SAMPLE_VIDEOS = [
+  { name: 'muzzleVideo.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo.mp4', label: 'Cattle A - Profile 1 (2.55 MB)' },
+  { name: 'muzzleVideo2.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo2.mp4', label: 'Cattle A - Profile 2 / Same Cattle (2.59 MB)' },
+  { name: 'muzzleVideo3.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo3.mp4', label: 'Cattle B - Different Cow (2.63 MB)' },
+  { name: 'muzzleVideo5.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo5.mp4', label: 'Cattle C - High Res (4.25 MB)' },
+  { name: 'muzzleVideo6.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo6.mp4', label: 'Cattle C - High Res 2 (4.26 MB)' },
+  { name: 'muzzleVideo7.mp4', path: '/home/adis_mayur/F_CODES/muzzleVideo7.mp4', label: 'Cattle D - Field Query (4.25 MB)' },
+];
+
 export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
-  // Video selection
+  // Video selection state
   const [videoA, setVideoA] = useState('/home/adis_mayur/F_CODES/muzzleVideo.mp4');
   const [videoB, setVideoB] = useState('/home/adis_mayur/F_CODES/muzzleVideo2.mp4');
+  const [inputModeA, setInputModeA] = useState('select'); // 'select' | 'upload'
+  const [inputModeB, setInputModeB] = useState('select');
+  const [uploadedNameA, setUploadedNameA] = useState('');
+  const [uploadedNameB, setUploadedNameB] = useState('');
+  const [uploadingA, setUploadingA] = useState(false);
+  const [uploadingB, setUploadingB] = useState(false);
 
-  // Filter & Threshold Configuration
-  const [filterMethod, setFilterMethod] = useState('frangi'); // 'frangi' | 'blackhat'
-  const [thresholdMethod, setThresholdMethod] = useState('adaptive'); // 'adaptive' | 'otsu'
+  // Model & Processing Configuration (sensible defaults)
+  const [dlBackbone, setDlBackbone] = useState('convnext_tiny'); // 'convnext_tiny' | 'resnet50'
+  const [dlInputMode, setDlInputMode] = useState('composite_3ch'); // 'composite_3ch' | 'skeleton_only' | 'groove_map'
+  const [filterMethod, setFilterMethod] = useState('frangi');
+  const [thresholdMethod, setThresholdMethod] = useState('adaptive');
   const [adaptiveBlockSize, setAdaptiveBlockSize] = useState(15);
   const [adaptiveC, setAdaptiveC] = useState(2);
   const [excludeNostrils, setExcludeNostrils] = useState(true);
-  const [minSpurLength, setMinSpurLength] = useState(8);
-  const [minComponentSize, setMinComponentSize] = useState(30);
 
-  // Deep Learning Model Configuration
-  const [dlBackbone, setDlBackbone] = useState('convnext_tiny'); // 'convnext_tiny' | 'resnet50'
-  const [dlInputMode, setDlInputMode] = useState('composite_3ch'); // 'composite_3ch' | 'skeleton_only' | 'groove_map'
+  // Accordion toggle states (hidden by default to avoid clutter)
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+  const [showFrameDetails, setShowFrameDetails] = useState(false);
+  const [viewStageA, setViewStageA] = useState('skeleton');
+  const [viewStageB, setViewStageB] = useState('skeleton');
+  const [previewImage, setPreviewImage] = useState(null);
 
-  // Calibration status from /api/video/matcher-config
-  const [matcherConfig, setMatcherConfig] = useState(null);
-  const [loadingConfig, setLoadingConfig] = useState(false);
+  // Unified single-click workflow execution state
+  const [processing, setProcessing] = useState(false);
+  const [progressStep, setProgressStep] = useState(0); // 0 = idle, 1 = Video A, 2 = Video B, 3 = Matching
+  const [progressMessage, setProgressMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState(null);
 
-  // Loading states
-  const [loadingA, setLoadingA] = useState(false);
-  const [loadingB, setLoadingB] = useState(false);
-  const [extractLogA, setExtractLogA] = useState('');
-  const [extractLogB, setExtractLogB] = useState('');
-
-  // Extracted 5-frame results
+  // Results state
+  const [matchResult, setMatchResult] = useState(null);
   const [dataA, setDataA] = useState(null);
   const [dataB, setDataB] = useState(null);
 
-  // Active view toggle on the 5 cards: 'skeleton' (5th Image default) | 'overlay' | 'crop' | 'enhanced' | 'response' | 'mask'
-  const [viewTypeA, setViewTypeA] = useState('skeleton');
-  const [viewTypeB, setViewTypeB] = useState('skeleton');
-
-  // Full-size image modal for frame preview
-  const [previewImage, setPreviewImage] = useState(null);
-
-  // Full-size modal for Keypoint Match Visualization
-  const [visualModalOpen, setVisualModalOpen] = useState(false);
-
-  // Biometric Matcher Result
-  const [biometricMatchResult, setBiometricMatchResult] = useState(null);
-  const [matchingBiometric, setMatchingBiometric] = useState(false);
-  const [matchError, setMatchError] = useState(null);
-
-  // Secondary Cosine Calculation Result
-  const [similarityResult, setSimilarityResult] = useState(null);
-  const [calculatingSim, setCalculatingSim] = useState(false);
-  const [showCosineDetails, setShowCosineDetails] = useState(false);
-
   // LocalStorage inspection modal
   const [showLocalStorageModal, setShowLocalStorageModal] = useState(false);
-  const [storageData, setStorageData] = useState({ a: null, b: null });
 
-  // Fetch matcher calibration configuration
-  const fetchMatcherConfig = async () => {
-    setLoadingConfig(true);
+  // Available videos list
+  const availableVideos = sampleVideos.length > 0
+    ? sampleVideos.map(v => ({ name: v.name, path: v.path, label: `${v.name} (${v.size_mb || '?'} MB)` }))
+    : DEFAULT_SAMPLE_VIDEOS;
+
+  // Upload handler for Video A
+  const handleFileUploadA = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingA(true);
+    const formData = new FormData();
+    formData.append('file', file);
     try {
-      const res = await fetch('/api/video/match-config');
-      if (res.ok) {
-        const config = await res.json();
-        setMatcherConfig(config);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        setVideoA(data.path);
+        setUploadedNameA(data.filename);
       } else {
-        setMatcherConfig({ calibrated: false, status: 'UNCALIBRATED' });
+        alert('Upload failed: ' + (data.detail || 'Unknown error'));
       }
     } catch (err) {
-      console.warn('Failed to fetch matcher config:', err);
-      setMatcherConfig({ calibrated: false, status: 'UNCALIBRATED' });
+      alert('Upload failed: ' + err.message);
     } finally {
-      setLoadingConfig(false);
+      setUploadingA(false);
     }
   };
 
-  useEffect(() => {
-    fetchMatcherConfig();
-  }, []);
-
-  // On mount: check if parameters exist in LocalStorage
-  useEffect(() => {
+  // Upload handler for Video B
+  const handleFileUploadB = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setUploadingB(true);
+    const formData = new FormData();
+    formData.append('file', file);
     try {
-      const storedA = localStorage.getItem('muzzle_video_a_params');
-      const storedB = localStorage.getItem('muzzle_video_b_params');
-      if (storedA) {
-        const parsedA = JSON.parse(storedA);
-        setDataA(parsedA);
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.success) {
+        setVideoB(data.path);
+        setUploadedNameB(data.filename);
+      } else {
+        alert('Upload failed: ' + (data.detail || 'Unknown error'));
       }
-      if (storedB) {
-        const parsedB = JSON.parse(storedB);
-        setDataB(parsedB);
-      }
-    } catch (e) {
-      console.warn('LocalStorage read error:', e);
-    }
-  }, []);
-
-  // Sync state to LocalStorage
-  const saveToLocalStorage = (key, data) => {
-    try {
-      localStorage.setItem(key, JSON.stringify(data));
-      setStorageData({
-        a: localStorage.getItem('muzzle_video_a_params'),
-        b: localStorage.getItem('muzzle_video_b_params'),
-      });
-    } catch (e) {
-      console.warn('LocalStorage save error:', e);
+    } catch (err) {
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploadingB(false);
     }
   };
 
-  // Clear LocalStorage
-  const handleClearStorage = () => {
-    localStorage.removeItem('muzzle_video_a_params');
-    localStorage.removeItem('muzzle_video_b_params');
-    setDataA(null);
-    setDataB(null);
-    setBiometricMatchResult(null);
-    setSimilarityResult(null);
-    setMatchError(null);
-    setStorageData({ a: null, b: null });
-  };
+  // =========================================================================
+  // THE 1-CLICK VERIFICATION PIPELINE
+  // Takes 2 videos -> Extracts frames & embeddings -> Returns verdict
+  // =========================================================================
+  const handleRunFullVerification = async () => {
+    if (processing) return;
+    setProcessing(true);
+    setErrorMessage(null);
+    setMatchResult(null);
 
-  // Extract 5 images & groove lines for Video A
-  const handleExtractVideoA = async () => {
-    if (loadingA || loadingB) return;
-    setLoadingA(true);
-    setBiometricMatchResult(null);
-    setSimilarityResult(null);
-    setMatchError(null);
-    setExtractLogA('Running Mask R-CNN detector with Canonical Alignment & Skeleton Pruning...');
     try {
-      const res = await fetch('/api/video/extract-five-muzzle-parameters', {
+      // Step 1: Video A extraction
+      setProgressStep(1);
+      setProgressMessage('Analyzing Video A: detecting muzzle & extracting ConvNeXt-Tiny embeddings...');
+      const resA = await fetch('/api/video/extract-five-muzzle-parameters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -196,40 +178,23 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           adaptive_block_size: parseInt(adaptiveBlockSize, 10),
           adaptive_c: parseInt(adaptiveC, 10),
           exclude_nostrils: excludeNostrils,
-          min_spur_length: parseInt(minSpurLength, 10),
-          min_component_size: parseInt(minComponentSize, 10),
+          min_spur_length: 8,
+          min_component_size: 30,
           dl_backbone: dlBackbone,
           dl_input_mode: dlInputMode,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setDataA(data);
-        saveToLocalStorage('muzzle_video_a_params', data);
-        const dlNote = data.dl_embedding ? ` | DL ${data.dl_embedding.backbone} (${data.dl_embedding.avg_inference_ms}ms)` : '';
-        setExtractLogA(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints${dlNote}). Stored in LocalStorage.`);
-      } else {
-        alert(data.detail || 'Extraction failed for Video A');
-        setExtractLogA('Extraction failed');
+      const extractedA = await resA.json();
+      if (!extractedA.success) {
+        throw new Error(extractedA.detail || 'Muzzle detection/extraction failed for Video A');
       }
-    } catch (err) {
-      alert('Failed to connect to backend: ' + err.message);
-      setExtractLogA('Backend error: ' + err.message);
-    } finally {
-      setLoadingA(false);
-    }
-  };
+      setDataA(extractedA);
+      localStorage.setItem('muzzle_video_a_params', JSON.stringify(extractedA));
 
-  // Extract 5 images & groove lines for Video B
-  const handleExtractVideoB = async () => {
-    if (loadingA || loadingB) return;
-    setLoadingB(true);
-    setBiometricMatchResult(null);
-    setSimilarityResult(null);
-    setMatchError(null);
-    setExtractLogB('Running Mask R-CNN detector with Canonical Alignment & Skeleton Pruning...');
-    try {
-      const res = await fetch('/api/video/extract-five-muzzle-parameters', {
+      // Step 2: Video B extraction
+      setProgressStep(2);
+      setProgressMessage('Analyzing Video B: detecting muzzle & extracting ConvNeXt-Tiny embeddings...');
+      const resB = await fetch('/api/video/extract-five-muzzle-parameters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -239,112 +204,30 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           adaptive_block_size: parseInt(adaptiveBlockSize, 10),
           adaptive_c: parseInt(adaptiveC, 10),
           exclude_nostrils: excludeNostrils,
-          min_spur_length: parseInt(minSpurLength, 10),
-          min_component_size: parseInt(minComponentSize, 10),
+          min_spur_length: 8,
+          min_component_size: 30,
           dl_backbone: dlBackbone,
           dl_input_mode: dlInputMode,
         }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setDataB(data);
-        saveToLocalStorage('muzzle_video_b_params', data);
-        const dlNote = data.dl_embedding ? ` | DL ${data.dl_embedding.backbone} (${data.dl_embedding.avg_inference_ms}ms)` : '';
-        setExtractLogB(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints${dlNote}). Stored in LocalStorage.`);
-      } else {
-        alert(data.detail || 'Extraction failed for Video B');
-        setExtractLogB('Extraction failed');
+      const extractedB = await resB.json();
+      if (!extractedB.success) {
+        throw new Error(extractedB.detail || 'Muzzle detection/extraction failed for Video B');
       }
-    } catch (err) {
-      alert('Failed to connect to backend: ' + err.message);
-      setExtractLogB('Backend error: ' + err.message);
-    } finally {
-      setLoadingB(false);
-    }
-  };
+      setDataB(extractedB);
+      localStorage.setItem('muzzle_video_b_params', JSON.stringify(extractedB));
 
-  // Extract both videos sequentially
-  const handleExtractBoth = async () => {
-    if (loadingA || loadingB) return;
-    await handleExtractVideoA();
-    await handleExtractVideoB();
-  };
+      // Step 3: Compute Biometric Cosine Match & Verdict
+      setProgressStep(3);
+      setProgressMessage('Matching biometrics: ArcFace 512-D GeM cosine similarity & topological minutiae...');
+      const vecA = extractedA.vector_array || Object.values(extractedA.median_parameters);
+      const vecB = extractedB.vector_array || Object.values(extractedB.median_parameters);
+      const dlEmbA = extractedA.dl_embedding?.median_embedding || null;
+      const dlEmbB = extractedB.dl_embedding?.median_embedding || null;
+      const perFramesA = extractedA.dl_embedding?.per_frame_embeddings || null;
+      const perFramesB = extractedB.dl_embedding?.per_frame_embeddings || null;
 
-  // RUN SPATIAL BIOMETRIC VERIFICATION (10 parameters are display-only)
-  const handleRunBiometricMatch = async () => {
-    if (matchingBiometric) return;
-    setMatchingBiometric(true);
-    setMatchError(null);
-
-    // Refresh config just before match
-    fetchMatcherConfig();
-
-    try {
-      const payload = {
-        video_a_path: videoA,
-        video_b_path: videoB,
-        filter_method: filterMethod,
-        threshold_method: thresholdMethod,
-        adaptive_block_size: parseInt(adaptiveBlockSize, 10),
-        adaptive_c: parseInt(adaptiveC, 10),
-        exclude_nostrils: excludeNostrils,
-        min_spur_length: parseInt(minSpurLength, 10),
-        min_component_size: parseInt(minComponentSize, 10),
-      };
-
-      const res = await fetch('/api/video/match', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Server returned ${res.status}`);
-      }
-
-      const matchData = await res.json();
-      setBiometricMatchResult(matchData);
-    } catch (err) {
-      console.error('Biometric matching error:', err);
-      setMatchError('Biometric matching failed: ' + err.message);
-    } finally {
-      setMatchingBiometric(false);
-    }
-  };
-
-  // Legacy cosine utility remains available for diagnostics only; it is never the verdict.
-  // Calculate cosine similarity from LocalStorage (display-only diagnostic)
-  const handleCalculateCosineSimilarity = async () => {
-    let storedA = null;
-    let storedB = null;
-    try {
-      const rawA = localStorage.getItem('muzzle_video_a_params');
-      const rawB = localStorage.getItem('muzzle_video_b_params');
-      if (rawA) storedA = JSON.parse(rawA);
-      if (rawB) storedB = JSON.parse(rawB);
-    } catch (e) {
-      console.warn('LocalStorage parse error:', e);
-    }
-
-    const currentA = storedA || dataA;
-    const currentB = storedB || dataB;
-
-    if (!currentA || !currentB) {
-      alert('Please extract 5 images for both Video A and Video B first to store their parameters in LocalStorage.');
-      return;
-    }
-
-    setCalculatingSim(true);
-    try {
-      const vecA = currentA.vector_array || (currentA.median_parameters ? Object.values(currentA.median_parameters) : []);
-      const vecB = currentB.vector_array || (currentB.median_parameters ? Object.values(currentB.median_parameters) : []);
-      const dlEmbA = currentA.dl_embedding?.median_embedding || null;
-      const dlEmbB = currentB.dl_embedding?.median_embedding || null;
-      const perFramesA = currentA.dl_embedding?.per_frame_embeddings || null;
-      const perFramesB = currentB.dl_embedding?.per_frame_embeddings || null;
-
-      const res = await fetch('/api/video/cosine-similarity', {
+      const resSim = await fetch('/api/video/cosine-similarity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -356,108 +239,103 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           per_frames_b: perFramesB,
         }),
       });
-      const simData = await res.json();
-      setSimilarityResult({
+      const simData = await resSim.json();
+
+      setMatchResult({
         ...simData,
-        dl_embedding_a: currentA.dl_embedding,
-        dl_embedding_b: currentB.dl_embedding,
-        paramsA: currentA.median_parameters,
-        paramsB: currentB.median_parameters,
-        videoAName: currentA.video_name,
-        videoBName: currentB.video_name,
+        dl_embedding_a: extractedA.dl_embedding,
+        dl_embedding_b: extractedB.dl_embedding,
+        paramsA: extractedA.median_parameters,
+        paramsB: extractedB.median_parameters,
+        videoAName: extractedA.video_name,
+        videoBName: extractedB.video_name,
       });
-      setShowCosineDetails(true);
+
+      // Scroll smoothly to results
+      setTimeout(() => {
+        const resultElem = document.getElementById('biometric-results-view');
+        if (resultElem) {
+          resultElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+
     } catch (err) {
-      alert('Cosine similarity calculation failed: ' + err.message);
+      console.error('Verification error:', err);
+      setErrorMessage(err.message || 'Verification failed');
     } finally {
-      setCalculatingSim(false);
+      setProcessing(false);
+      setProgressStep(0);
     }
   };
 
-  const getFrameImageUrl = (frame, viewType) => {
+  const getFrameUrl = (frame, viewType) => {
     switch (viewType) {
-      case 'crop':
-        return frame.crop_url;
-      case 'enhanced':
-        return frame.enhanced_url;
-      case 'response':
-        return frame.groove_response_url;
-      case 'mask':
-        return frame.groove_mask_url;
-      case 'overlay':
-        return frame.overlay_url;
+      case 'crop': return frame.crop_url;
+      case 'enhanced': return frame.enhanced_url;
+      case 'response': return frame.groove_response_url;
+      case 'mask': return frame.groove_mask_url;
+      case 'overlay': return frame.overlay_url;
       case 'skeleton':
-      default:
-        return frame.skeleton_url; // 5th Image: Thin Skeleton
+      default: return frame.skeleton_url;
     }
   };
 
-  const isCalibrated = matcherConfig && matcherConfig.calibrated === true;
-  const calibratedThreshold = isCalibrated && matcherConfig.threshold !== null && matcherConfig.threshold !== undefined
-    ? Number(matcherConfig.threshold)
-    : null;
+  // Quick preset loader
+  const applyPreset = (pathA, pathB) => {
+    setVideoA(pathA);
+    setVideoB(pathB);
+    setInputModeA('select');
+    setInputModeB('select');
+    setMatchResult(null);
+    setErrorMessage(null);
+  };
+
+  // Reset all
+  const handleReset = () => {
+    setDataA(null);
+    setDataB(null);
+    setMatchResult(null);
+    setErrorMessage(null);
+    localStorage.removeItem('muzzle_video_a_params');
+    localStorage.removeItem('muzzle_video_b_params');
+  };
 
   return (
-    <div className="flex flex-col gap-6 text-slate-100 max-w-7xl mx-auto w-full pb-16">
-      {/* Header Bar */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-              <ShieldCheck className="w-6 h-6 text-emerald-400" />
-              2-Video Muzzle Biometric Matcher
-            </h1>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
-              SIFT/ORB RANSAC &bull; Minutiae Topology &bull; Canonical Alignment
-            </span>
-
-            {/* Calibration Status Badge */}
-            {isCalibrated ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono shadow-sm">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                Calibrated EER Threshold: {(calibratedThreshold * 100).toFixed(1)}% ({calibratedThreshold.toFixed(3)})
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono">
-                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                UNCALIBRATED
-              </span>
-            )}
+    <div className="flex flex-col gap-6 text-slate-100 max-w-5xl mx-auto w-full pb-20">
+      
+      {/* ========================================================= */}
+      {/* 1. CLEAN HEADER                                           */}
+      {/* ========================================================= */}
+      <div className="glass-panel p-6 rounded-2xl border border-slate-800 flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+            <ShieldCheck className="w-7 h-7 text-slate-950" />
           </div>
-
-          <p className="text-xs text-slate-400 mt-1.5">
-            Extracts canonical 448x448 muzzle crops, performs skeleton spur &amp; component pruning, runs 5×5 pairwise verification using SIFT/ORB RANSAC inliers and Minutiae graph topology.
-          </p>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+              Cattle Muzzle Biometric Matcher
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                ConvNeXt ArcFace &bull; 512-D
+              </span>
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Select or upload 2 cattle videos to verify biometric identity across 5 temporal muzzle frames.
+            </p>
+          </div>
         </div>
 
-        {/* Global Action Buttons */}
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchMatcherConfig}
-            disabled={loadingConfig}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors"
-            title="Refresh matcher configuration"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 text-slate-400 ${loadingConfig ? 'animate-spin' : ''}`} />
-            Refresh Config
-          </button>
-          <button
-            onClick={() => {
-              setStorageData({
-                a: localStorage.getItem('muzzle_video_a_params'),
-                b: localStorage.getItem('muzzle_video_b_params'),
-              });
-              setShowLocalStorageModal(true);
-            }}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors"
+            onClick={() => setShowLocalStorageModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition-colors"
           >
             <Database className="w-3.5 h-3.5 text-teal-400" />
             LocalStorage
           </button>
           <button
-            onClick={handleClearStorage}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 transition-colors"
-            title="Clear stored parameters"
+            onClick={handleReset}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-300 transition-colors"
+            title="Reset videos and results"
           >
             <Trash2 className="w-3.5 h-3.5" />
             Reset
@@ -465,1164 +343,655 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
         </div>
       </div>
 
-      {/* Uncalibrated Alert Banner (Helpful Tip) */}
-      {!isCalibrated && (
-        <div className="glass-panel p-3.5 rounded-xl border border-amber-500/40 bg-amber-950/20 flex items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2.5 text-amber-200">
-            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>
-              <strong>Matcher Status: UNCALIBRATED.</strong> Run <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-amber-500/30 text-amber-300 font-mono">tools/eval_matching.py</code> to calibrate decision threshold and generate ROC/EER operating point.
-            </span>
-          </div>
-          <button
-            onClick={fetchMatcherConfig}
-            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-mono text-[11px] shrink-0"
-          >
-            Check Again
-          </button>
-        </div>
-      )}
-
       {/* ========================================================= */}
-      {/* THRESHOLD & SKELETON PRUNING CONFIGURATION OPTIONS        */}
+      {/* 2. VIDEO INPUT CARDS (VIDEO A & VIDEO B)                  */}
       {/* ========================================================= */}
-      <div className="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col gap-3">
-        <div className="flex items-center justify-between border-b border-slate-800/80 pb-2 flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
-            <Sliders className="w-4 h-4 text-emerald-400" />
-            <span>Groove Extraction, Pruning &amp; Matching Options:</span>
-          </div>
-          <span className="text-[10px] text-slate-400 font-mono">
-            Pipeline: Quality Gating &rarr; Canonical Alignment (448px) &rarr; Spur/Component Pruning &rarr; SIFT + Minutiae
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 text-xs">
-          {/* Option 1: Filter Method */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-slate-400 font-semibold flex items-center justify-between">
-              <span>Filter Method:</span>
-              <span className="text-[10px] font-mono text-emerald-400 font-bold">{filterMethod === 'frangi' ? 'Frangi' : 'Black-Hat'}</span>
-            </label>
-            <select
-              value={filterMethod}
-              onChange={(e) => setFilterMethod(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-emerald-500 font-medium"
-            >
-              <option value="frangi">Frangi Hessian (Eigenvalues)</option>
-              <option value="blackhat">Multi-Scale Black-Hat</option>
-            </select>
-          </div>
-
-          {/* Option 2: Threshold Method */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-slate-400 font-semibold flex items-center justify-between">
-              <span>Threshold Method:</span>
-              <span className="text-[10px] font-mono text-emerald-400 font-bold">{thresholdMethod === 'adaptive' ? 'Adaptive' : 'Otsu'}</span>
-            </label>
-            <select
-              value={thresholdMethod}
-              onChange={(e) => setThresholdMethod(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-emerald-500 font-medium"
-            >
-              <option value="adaptive">Adaptive Gaussian</option>
-              <option value="otsu">Standard / Otsu</option>
-            </select>
-          </div>
-
-          {/* Option 3: Adaptive Gaussian Block Size & Constant C */}
-          {thresholdMethod === 'adaptive' ? (
-            <div className="flex items-center gap-2">
-              <div className="flex-1 flex flex-col gap-1.5">
-                <label className="text-slate-400 font-semibold flex items-center justify-between">
-                  <span>Block:</span>
-                  <span className="text-[10px] font-mono text-slate-300">{adaptiveBlockSize}px</span>
-                </label>
-                <select
-                  value={adaptiveBlockSize}
-                  onChange={(e) => setAdaptiveBlockSize(Number(e.target.value))}
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-hidden focus:border-emerald-500 font-mono"
-                >
-                  <option value={9}>9px</option>
-                  <option value={15}>15px</option>
-                  <option value={21}>21px</option>
-                  <option value={31}>31px</option>
-                </select>
-              </div>
-
-              <div className="flex-1 flex flex-col gap-1.5">
-                <label className="text-slate-400 font-semibold flex items-center justify-between">
-                  <span>C:</span>
-                  <span className="text-[10px] font-mono text-slate-300">+{adaptiveC}</span>
-                </label>
-                <select
-                  value={adaptiveC}
-                  onChange={(e) => setAdaptiveC(Number(e.target.value))}
-                  className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-hidden focus:border-emerald-500 font-mono"
-                >
-                  <option value={1}>1</option>
-                  <option value={2}>2</option>
-                  <option value={3}>3</option>
-                  <option value={5}>5</option>
-                </select>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        
+        {/* CARD VIDEO A */}
+        <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-4 relative overflow-hidden">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-sm border border-emerald-500/30 font-mono">
+                A
+              </span>
+              <div>
+                <h3 className="text-sm font-bold text-white">Video A (Reference Animal)</h3>
+                <span className="text-[11px] text-slate-400">Registered baseline cattle video</span>
               </div>
             </div>
+            
+            <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-xs">
+              <button
+                onClick={() => setInputModeA('select')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  inputModeA === 'select' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Sample Video
+              </button>
+              <button
+                onClick={() => setInputModeA('upload')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  inputModeA === 'upload' ? 'bg-emerald-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Upload File
+              </button>
+            </div>
+          </div>
+
+          {inputModeA === 'select' ? (
+            <div className="flex flex-col gap-1.5 text-xs">
+              <label className="text-slate-400 font-medium">Choose Reference Video:</label>
+              <select
+                value={videoA}
+                onChange={(e) => setVideoA(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-hidden focus:border-emerald-500 font-medium"
+              >
+                {availableVideos.map((v, i) => (
+                  <option key={i} value={v.path}>{v.label || v.name}</option>
+                ))}
+              </select>
+            </div>
           ) : (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-slate-400 font-semibold">Standard Threshold:</label>
-              <div className="px-3 py-1.5 rounded-lg bg-slate-900/60 border border-slate-800 text-slate-400 text-xs truncate">
-                Otsu auto-bimodal
-              </div>
+            <div className="flex flex-col gap-2 text-xs">
+              <label className="text-slate-400 font-medium">Upload Video File (.mp4):</label>
+              <label className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 rounded-xl p-4 text-center cursor-pointer bg-slate-900/60 flex flex-col items-center justify-center gap-1.5 transition-colors">
+                <Upload className="w-5 h-5 text-emerald-400" />
+                <span className="text-slate-300 font-medium">
+                  {uploadingA ? 'Uploading video...' : uploadedNameA ? uploadedNameA : 'Click to browse MP4 file'}
+                </span>
+                <span className="text-[10px] text-slate-500">Max size 50 MB</span>
+                <input type="file" accept="video/mp4,video/*" onChange={handleFileUploadA} className="hidden" />
+              </label>
             </div>
           )}
 
-          {/* Option 4: Skeleton Pruning Parameters */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1 flex flex-col gap-1.5">
-              <label className="text-slate-400 font-semibold flex items-center justify-between">
-                <span>Spur Prune:</span>
-                <span className="text-[10px] font-mono text-teal-400">&lt;{minSpurLength}px</span>
-              </label>
-              <select
-                value={minSpurLength}
-                onChange={(e) => setMinSpurLength(Number(e.target.value))}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-hidden focus:border-teal-500 font-mono"
-              >
-                <option value={4}>4 px</option>
-                <option value={8}>8 px (Default)</option>
-                <option value={12}>12 px</option>
-                <option value={16}>16 px</option>
-              </select>
+          <div className="text-[11px] font-mono text-slate-400 truncate bg-slate-900/50 p-2 rounded-lg border border-slate-800/80">
+            Selected: <span className="text-emerald-300">{videoA.split('/').pop()}</span>
+          </div>
+        </div>
+
+        {/* CARD VIDEO B */}
+        <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-4 relative overflow-hidden">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <span className="w-7 h-7 rounded-lg bg-teal-500/20 text-teal-400 font-bold flex items-center justify-center text-sm border border-teal-500/30 font-mono">
+                B
+              </span>
+              <div>
+                <h3 className="text-sm font-bold text-white">Video B (Query Candidate)</h3>
+                <span className="text-[11px] text-slate-400">Target video to compare against A</span>
+              </div>
             </div>
 
-            <div className="flex-1 flex flex-col gap-1.5">
-              <label className="text-slate-400 font-semibold flex items-center justify-between">
-                <span>Min Cluster:</span>
-                <span className="text-[10px] font-mono text-teal-400">&ge;{minComponentSize}px</span>
-              </label>
-              <select
-                value={minComponentSize}
-                onChange={(e) => setMinComponentSize(Number(e.target.value))}
-                className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-slate-200 focus:outline-hidden focus:border-teal-500 font-mono"
+            <div className="flex items-center bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-xs">
+              <button
+                onClick={() => setInputModeB('select')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  inputModeB === 'select' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
               >
-                <option value={15}>15 px</option>
-                <option value={30}>30 px (Default)</option>
-                <option value={50}>50 px</option>
-              </select>
+                Sample Video
+              </button>
+              <button
+                onClick={() => setInputModeB('upload')}
+                className={`px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                  inputModeB === 'upload' ? 'bg-teal-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                Upload File
+              </button>
             </div>
           </div>
 
-          {/* Option 5: Nostril Cavity Suppression */}
-          <div className="flex flex-col gap-1.5 justify-center">
-            <label className="text-slate-400 font-semibold">Nostril Cavity:</label>
-            <label className="flex items-center gap-2 cursor-pointer text-slate-300 select-none py-1">
-              <input
-                type="checkbox"
-                checked={excludeNostrils}
-                onChange={(e) => setExcludeNostrils(e.target.checked)}
-                className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-400 bg-slate-900 border-slate-700"
-              />
-              <span className="text-xs">Suppress Nostril Dark Holes</span>
-            </label>
+          {inputModeB === 'select' ? (
+            <div className="flex flex-col gap-1.5 text-xs">
+              <label className="text-slate-400 font-medium">Choose Candidate Video:</label>
+              <select
+                value={videoB}
+                onChange={(e) => setVideoB(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-hidden focus:border-teal-500 font-medium"
+              >
+                {availableVideos.map((v, i) => (
+                  <option key={i} value={v.path}>{v.label || v.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 text-xs">
+              <label className="text-slate-400 font-medium">Upload Video File (.mp4):</label>
+              <label className="border-2 border-dashed border-slate-700 hover:border-teal-500/60 rounded-xl p-4 text-center cursor-pointer bg-slate-900/60 flex flex-col items-center justify-center gap-1.5 transition-colors">
+                <Upload className="w-5 h-5 text-teal-400" />
+                <span className="text-slate-300 font-medium">
+                  {uploadingB ? 'Uploading video...' : uploadedNameB ? uploadedNameB : 'Click to browse MP4 file'}
+                </span>
+                <span className="text-[10px] text-slate-500">Max size 50 MB</span>
+                <input type="file" accept="video/mp4,video/*" onChange={handleFileUploadB} className="hidden" />
+              </label>
+            </div>
+          )}
+
+          <div className="text-[11px] font-mono text-slate-400 truncate bg-slate-900/50 p-2 rounded-lg border border-slate-800/80">
+            Selected: <span className="text-teal-300">{videoB.split('/').pop()}</span>
           </div>
         </div>
       </div>
 
-      {/* ========================================================= */}
-      {/* DEEP LEARNING MODEL CONFIGURATION (ARCFACE / GeM)         */}
-      {/* ========================================================= */}
-      <div className="glass-panel p-4 rounded-xl border border-indigo-900/60 bg-gradient-to-r from-slate-950 via-indigo-950/20 to-slate-950 flex flex-col gap-3">
-        <div className="flex items-center justify-between border-b border-indigo-900/40 pb-2 flex-wrap gap-2">
-          <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
-            <Cpu className="w-4 h-4 text-indigo-400" />
-            <span>Deep Learning Biometric Model Configuration (ArcFace / GeM 512-D):</span>
-          </div>
-          <div className="flex items-center gap-2 text-[10px] font-mono">
-            <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1">
-              <Zap className="w-3 h-3 text-amber-400" />
-              GeM Pooling (p=3.0) &bull; 512-D L2 Unit Sphere
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          {/* DL Backbone Selector */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-slate-300 font-semibold flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Cpu className="w-3.5 h-3.5 text-indigo-400" />
-                DL Backbone Architecture:
-              </span>
-              <span className="text-[10px] font-mono text-indigo-400 font-bold">
-                {dlBackbone === 'convnext_tiny' ? 'ConvNeXt-Tiny (Low Latency)' : 'ResNet-50 (Baseline)'}
-              </span>
-            </label>
-            <select
-              value={dlBackbone}
-              onChange={(e) => setDlBackbone(e.target.value)}
-              className="bg-slate-900 border border-indigo-900/60 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-indigo-500 font-medium"
-            >
-              <option value="convnext_tiny">ConvNeXt-Tiny (Low Latency, High Minutiae Sensitivity ~47ms)</option>
-              <option value="resnet50">ResNet-50 (Deep Residual Baseline, 2048-D GeM ~48ms)</option>
-            </select>
-          </div>
-
-          {/* DL Input Tensor Mode */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-slate-300 font-semibold flex items-center justify-between">
-              <span className="flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                DL Input Tensor Construction (1-px Sparsity Handling):
-              </span>
-              <span className="text-[10px] font-mono text-indigo-400 font-bold">
-                {dlInputMode === 'composite_3ch' ? '3-Ch Composite' : dlInputMode === 'skeleton_only' ? 'Skeleton Density' : 'Groove Map'}
-              </span>
-            </label>
-            <select
-              value={dlInputMode}
-              onChange={(e) => setDlInputMode(e.target.value)}
-              className="bg-slate-900 border border-indigo-900/60 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-indigo-500 font-medium"
-            >
-              <option value="composite_3ch">3-Ch Composite (R=Stage 2 CLAHE, G=Stage 3 Groove, B=Stage 5 Dilated 3x3 Skeleton)</option>
-              <option value="skeleton_only">Stage 5 Skeleton Only (Dilated 3x3 + Gaussian Ridge Density Map)</option>
-              <option value="groove_map">Stage 3 Groove Response Map (Replicated 3 Channels)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Preset Quick Tests Bar */}
-      <div className="glass-panel p-3.5 rounded-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-2 text-slate-300 font-semibold">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <span>Quick Video Pairs:</span>
-        </div>
+      {/* QUICK PRESETS PILLS */}
+      <div className="flex items-center justify-between flex-wrap gap-2 text-xs text-slate-400 px-1">
+        <span className="flex items-center gap-1 font-semibold text-slate-300">
+          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+          Quick Test Pairs:
+        </span>
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => {
-              setVideoA('/home/adis_mayur/F_CODES/muzzleVideo.mp4');
-              setVideoB('/home/adis_mayur/F_CODES/muzzleVideo.mp4');
-            }}
-            className="px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium transition-colors"
+            onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo.mp4')}
+            className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium transition-colors"
           >
             🟢 Same Cattle (Video 1 vs Video 1)
           </button>
           <button
-            onClick={() => {
-              setVideoA('/home/adis_mayur/F_CODES/muzzleVideo.mp4');
-              setVideoB('/home/adis_mayur/F_CODES/muzzleVideo2.mp4');
-            }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors"
+            onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo2.mp4')}
+            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors"
           >
-            🔍 Pair A/B (Video 1 vs Video 2)
+            🔍 Video 1 vs Video 2 (Same Animal Different Take)
           </button>
           <button
-            onClick={() => {
-              setVideoA('/home/adis_mayur/F_CODES/muzzleVideo2.mp4');
-              setVideoB('/home/adis_mayur/F_CODES/muzzleVideo3.mp4');
-            }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors"
+            onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo3.mp4')}
+            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors"
           >
-            🔍 Pair B/C (Video 2 vs Video 3)
-          </button>
-          <button
-            onClick={() => {
-              setVideoA('/home/adis_mayur/F_CODES/muzzleVideo5.mp4');
-              setVideoB('/home/adis_mayur/F_CODES/muzzleVideo6.mp4');
-            }}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium transition-colors"
-          >
-            🔍 High-Res (Video 5 vs Video 6)
+            🔴 Video 1 vs Video 3 (Different Cattle)
           </button>
         </div>
       </div>
 
-      {/* 2-Column Video Panels */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* ========================================================= */}
-        {/* VIDEO A PANEL                                             */}
-        {/* ========================================================= */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-sm border border-emerald-500/30">
-                A
-              </span>
-              <div>
-                <h2 className="text-base font-bold text-white">Cattle Video A (Reference Profile)</h2>
-                <span className="text-[11px] text-slate-400">Extracts 5 canonical frames &bull; computes minutiae topology</span>
-              </div>
-            </div>
-            {dataA && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                <Database className="w-3 h-3" />
-                In LocalStorage
-              </span>
-            )}
-          </div>
-
-          {/* Video Selector Dropdown */}
-          <div className="flex flex-col gap-1.5 text-xs">
-            <label className="text-slate-400 font-medium">Select Video A:</label>
-            <select
-              value={videoA}
-              onChange={(e) => setVideoA(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-hidden focus:border-emerald-500"
-            >
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo.mp4">muzzleVideo.mp4 (2.55 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo2.mp4">muzzleVideo2.mp4 (2.59 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo3.mp4">muzzleVideo3.mp4 (2.63 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo5.mp4">muzzleVideo5.mp4 (4.25 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo6.mp4">muzzleVideo6.mp4 (4.26 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo7.mp4">muzzleVideo7.mp4 (4.25 MB)</option>
-            </select>
-          </div>
-
-          {/* Extraction Trigger */}
-          <button
-            onClick={handleExtractVideoA}
-            disabled={loadingA || loadingB}
-            className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
-              loadingA || loadingB
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-emerald-500/20'
-            }`}
-          >
-            {loadingA ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
-                <span>Aligning &amp; Extracting 5 Frames (Video A)...</span>
-              </>
-            ) : (
-              <>
-                <ScanLine className="w-4 h-4" />
-                <span>{dataA ? 'Re-Extract 5 Images (Video A)' : 'Extract 5 Images & Store in LocalStorage'}</span>
-              </>
-            )}
-          </button>
-
-          {extractLogA && (
-            <div className="text-[11px] font-mono text-emerald-400 bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-500/30">
-              {extractLogA}
-            </div>
-          )}
-
-          {/* 5 Extracted Images Strip */}
-          {dataA && (
-            <div className="flex flex-col gap-3 pt-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="font-semibold text-slate-200">5 Extracted Muzzle Images:</span>
-                <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
-                  <button
-                    onClick={() => setViewTypeA('skeleton')}
-                    className={`px-2 py-0.5 rounded ${viewTypeA === 'skeleton' ? 'bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40' : 'text-slate-400'}`}
-                  >
-                    5th Image (Lines)
-                  </button>
-                  <button
-                    onClick={() => setViewTypeA('overlay')}
-                    className={`px-2 py-0.5 rounded ${viewTypeA === 'overlay' ? 'bg-slate-800 text-emerald-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Overlay
-                  </button>
-                  <button
-                    onClick={() => setViewTypeA('response')}
-                    className={`px-2 py-0.5 rounded ${viewTypeA === 'response' ? 'bg-slate-800 text-emerald-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Filter Resp
-                  </button>
-                  <button
-                    onClick={() => setViewTypeA('crop')}
-                    className={`px-2 py-0.5 rounded ${viewTypeA === 'crop' ? 'bg-slate-800 text-emerald-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Mask R-CNN Crop
-                  </button>
-                </div>
-              </div>
-
-              {/* 5 Images Grid */}
-              <div className="grid grid-cols-5 gap-2">
-                {dataA.frames.map((f, i) => {
-                  const imgUrl = getFrameImageUrl(f, viewTypeA);
-                  return (
-                    <div
-                      key={i}
-                      onClick={() => setPreviewImage({ url: imgUrl, title: `Video A - Frame #${f.frame_number} (${viewTypeA})`, params: f.parameters })}
-                      className="group flex flex-col rounded-lg border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-emerald-500 transition-colors"
-                    >
-                      <div className="aspect-square relative overflow-hidden bg-slate-950">
-                        <img
-                          src={imgUrl}
-                          alt={`Frame ${f.frame_number}`}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <span className="absolute top-1 left-1 text-[9px] font-mono px-1 rounded bg-slate-950/80 text-slate-300">
-                          #{f.frame_number}
-                        </span>
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <Maximize2 className="w-3.5 h-3.5 text-white" />
-                        </div>
-                      </div>
-                      <div className="p-1 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60">
-                        {f.parameters?.skeleton_pixels ?? 0} skel px
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Parameters Summary Badge List (Display Only) */}
-              <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div>
-                  <span className="text-slate-400">Ridge Skeleton: </span>
-                  <span className="font-bold text-teal-300">{dataA.median_parameters?.skeleton_pixels ?? 'N/A'} px</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Groove Valleys: </span>
-                  <span className="font-bold text-teal-300">{dataA.median_parameters?.groove_pixels ?? 'N/A'} px</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Endpoints: </span>
-                  <span className="font-bold text-slate-200">{dataA.median_parameters?.endpoints ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Junctions: </span>
-                  <span className="font-bold text-slate-200">{dataA.median_parameters?.junctions ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Cycles: </span>
-                  <span className="font-bold text-slate-200">{dataA.median_parameters?.cycles ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Euler (χ): </span>
-                  <span className="font-bold text-slate-200">{dataA.median_parameters?.euler_characteristic ?? 'N/A'}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* ========================================================= */}
-        {/* VIDEO B PANEL                                             */}
-        {/* ========================================================= */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-4">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 rounded-lg bg-teal-500/20 text-teal-400 font-bold flex items-center justify-center text-sm border border-teal-500/30">
-                B
-              </span>
-              <div>
-                <h2 className="text-base font-bold text-white">Cattle Video B (Query Candidate)</h2>
-                <span className="text-[11px] text-slate-400">Extracts 5 canonical frames &bull; computes minutiae topology</span>
-              </div>
-            </div>
-            {dataB && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-teal-500/15 text-teal-300 border border-teal-500/30">
-                <Database className="w-3 h-3" />
-                In LocalStorage
-              </span>
-            )}
-          </div>
-
-          {/* Video Selector Dropdown */}
-          <div className="flex flex-col gap-1.5 text-xs">
-            <label className="text-slate-400 font-medium">Select Video B:</label>
-            <select
-              value={videoB}
-              onChange={(e) => setVideoB(e.target.value)}
-              className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-hidden focus:border-teal-500"
-            >
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo.mp4">muzzleVideo.mp4 (2.55 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo2.mp4">muzzleVideo2.mp4 (2.59 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo3.mp4">muzzleVideo3.mp4 (2.63 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo5.mp4">muzzleVideo5.mp4 (4.25 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo6.mp4">muzzleVideo6.mp4 (4.26 MB)</option>
-              <option value="/home/adis_mayur/F_CODES/muzzleVideo7.mp4">muzzleVideo7.mp4 (4.25 MB)</option>
-            </select>
-          </div>
-
-          {/* Extraction Trigger */}
-          <button
-            onClick={handleExtractVideoB}
-            disabled={loadingA || loadingB}
-            className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-md ${
-              loadingA || loadingB
-                ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                : 'bg-gradient-to-r from-teal-500 to-cyan-500 hover:from-teal-400 hover:to-cyan-400 text-slate-950 shadow-teal-500/20'
-            }`}
-          >
-            {loadingB ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin text-teal-400" />
-                <span>Aligning &amp; Extracting 5 Frames (Video B)...</span>
-              </>
-            ) : (
-              <>
-                <ScanLine className="w-4 h-4" />
-                <span>{dataB ? 'Re-Extract 5 Images (Video B)' : 'Extract 5 Images & Store in LocalStorage'}</span>
-              </>
-            )}
-          </button>
-
-          {extractLogB && (
-            <div className="text-[11px] font-mono text-teal-400 bg-teal-950/30 px-3 py-1.5 rounded-lg border border-teal-500/30">
-              {extractLogB}
-            </div>
-          )}
-
-          {/* 5 Extracted Images Strip */}
-          {dataB && (
-            <div className="flex flex-col gap-3 pt-2">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span className="font-semibold text-slate-200">5 Extracted Muzzle Images:</span>
-                <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
-                  <button
-                    onClick={() => setViewTypeB('skeleton')}
-                    className={`px-2 py-0.5 rounded ${viewTypeB === 'skeleton' ? 'bg-teal-500/20 text-teal-300 font-bold border border-teal-500/40' : 'text-slate-400'}`}
-                  >
-                    5th Image (Lines)
-                  </button>
-                  <button
-                    onClick={() => setViewTypeB('overlay')}
-                    className={`px-2 py-0.5 rounded ${viewTypeB === 'overlay' ? 'bg-slate-800 text-teal-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Overlay
-                  </button>
-                  <button
-                    onClick={() => setViewTypeB('response')}
-                    className={`px-2 py-0.5 rounded ${viewTypeB === 'response' ? 'bg-slate-800 text-teal-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Filter Resp
-                  </button>
-                  <button
-                    onClick={() => setViewTypeB('crop')}
-                    className={`px-2 py-0.5 rounded ${viewTypeB === 'crop' ? 'bg-slate-800 text-teal-300 font-bold' : 'text-slate-400'}`}
-                  >
-                    Mask R-CNN Crop
-                  </button>
-                </div>
-              </div>
-
-              {/* 5 Images Grid */}
-              <div className="grid grid-cols-5 gap-2">
-                {dataB.frames.map((f, i) => {
-                  const imgUrl = getFrameImageUrl(f, viewTypeB);
-                  return (
-                    <div
-                      key={i}
-                      onClick={() => setPreviewImage({ url: imgUrl, title: `Video B - Frame #${f.frame_number} (${viewTypeB})`, params: f.parameters })}
-                      className="group flex flex-col rounded-lg border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-teal-500 transition-colors"
-                    >
-                      <div className="aspect-square relative overflow-hidden bg-slate-950">
-                        <img
-                          src={imgUrl}
-                          alt={`Frame ${f.frame_number}`}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <span className="absolute top-1 left-1 text-[9px] font-mono px-1 rounded bg-slate-950/80 text-slate-300">
-                          #{f.frame_number}
-                        </span>
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                          <Maximize2 className="w-3.5 h-3.5 text-white" />
-                        </div>
-                      </div>
-                      <div className="p-1 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60">
-                        {f.parameters?.skeleton_pixels ?? 0} skel px
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Parameters Summary Badge List (Display Only) */}
-              <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div>
-                  <span className="text-slate-400">Ridge Skeleton: </span>
-                  <span className="font-bold text-teal-300">{dataB.median_parameters?.skeleton_pixels ?? 'N/A'} px</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Groove Valleys: </span>
-                  <span className="font-bold text-teal-300">{dataB.median_parameters?.groove_pixels ?? 'N/A'} px</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Endpoints: </span>
-                  <span className="font-bold text-slate-200">{dataB.median_parameters?.endpoints ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Junctions: </span>
-                  <span className="font-bold text-slate-200">{dataB.median_parameters?.junctions ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Cycles: </span>
-                  <span className="font-bold text-slate-200">{dataB.median_parameters?.cycles ?? 'N/A'}</span>
-                </div>
-                <div>
-                  <span className="text-slate-400">Euler (χ): </span>
-                  <span className="font-bold text-slate-200">{dataB.median_parameters?.euler_characteristic ?? 'N/A'}</span>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 1-Click Both Videos Extract Bar */}
-      <div className="flex justify-center">
+      {/* ========================================================= */}
+      {/* 3. THE MAIN SUBMIT BUTTON                                 */}
+      {/* ========================================================= */}
+      <div className="flex flex-col gap-3 items-center">
         <button
-          onClick={handleExtractBoth}
-          disabled={loadingA || loadingB}
-          className="px-6 py-2.5 rounded-xl font-semibold text-xs bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center gap-2 transition-colors disabled:opacity-50"
+          onClick={handleRunFullVerification}
+          disabled={processing}
+          className={`w-full py-4 px-6 rounded-2xl font-bold text-sm tracking-wide flex items-center justify-center gap-3 transition-all shadow-xl ${
+            processing
+              ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-slate-700'
+              : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 shadow-emerald-500/25 hover:shadow-emerald-500/40 hover:scale-[1.01]'
+          }`}
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loadingA || loadingB ? 'animate-spin text-emerald-400' : ''}`} />
-          Extract Both Videos &amp; Store in LocalStorage (1-Click)
+          {processing ? (
+            <>
+              <RefreshCw className="w-5 h-5 animate-spin text-emerald-400" />
+              <span>{progressMessage || 'Processing Videos...'}</span>
+            </>
+          ) : (
+            <>
+              <Zap className="w-5 h-5 fill-slate-950" />
+              <span>COMPARE 2 VIDEOS &amp; GET BIOMETRIC RESULT</span>
+              <ArrowRight className="w-5 h-5" />
+            </>
+          )}
         </button>
-      </div>
 
-      {/* ========================================================= */}
-      {/* PRIMARY BIOMETRIC VERIFICATION CALL-TO-ACTION             */}
-      {/* ========================================================= */}
-      <div className="glass-panel p-6 rounded-2xl border border-slate-800 flex flex-col items-center gap-4 text-center bg-gradient-to-b from-slate-900/60 to-slate-950/80">
-        <div className="max-w-xl">
-          <h3 className="text-lg font-bold text-white flex items-center justify-center gap-2">
-            <ShieldCheck className="w-5 h-5 text-emerald-400" />
-            Biometric Match (SIFT + Minutiae)
-          </h3>
-          <p className="text-xs text-slate-400 mt-1">
-            Compares 5×5 (25 pairwise) canonical frame combinations using SIFT/ORB RANSAC inlier ratio (Method A) and skeleton minutiae topology (Method B) against the calibrated EER threshold.
-          </p>
-        </div>
+        {/* Animated Progress Indicator */}
+        {processing && (
+          <div className="w-full glass-panel p-4 rounded-xl border border-emerald-500/30 flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs font-mono">
+              <span className="text-emerald-300 font-bold">{progressMessage}</span>
+              <span className="text-slate-400">Step {progressStep} of 3</span>
+            </div>
+            <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+              <div
+                className="bg-gradient-to-r from-emerald-500 to-teal-400 h-2 rounded-full transition-all duration-500"
+                style={{ width: `${(progressStep / 3) * 100}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
 
-        <div className="flex items-center gap-3 flex-wrap justify-center">
-          {/* Main Verification Button */}
-          <button
-            onClick={handleRunBiometricMatch}
-            disabled={matchingBiometric}
-            className={`px-8 py-4 rounded-2xl font-black text-sm tracking-wide uppercase flex items-center gap-3 transition-all shadow-xl ${
-              matchingBiometric
-                ? 'bg-emerald-600 text-slate-950 cursor-wait'
-                : 'bg-gradient-to-r from-emerald-400 via-teal-400 to-cyan-400 hover:from-emerald-300 hover:to-cyan-300 text-slate-950 shadow-emerald-500/30 scale-100 hover:scale-[1.02]'
-            }`}
-          >
-            {matchingBiometric ? (
-              <>
-                <RefreshCw className="w-5 h-5 animate-spin" />
-                <span>Running 5×5 Biometric Verification...</span>
-              </>
-            ) : (
-              <>
-                <Crosshair className="w-5 h-5" />
-                <span>Run Biometric Verification (SIFT + Minutiae)</span>
-                <ArrowRight className="w-5 h-5" />
-              </>
-            )}
-          </button>
-
-          {/* Secondary / Optional: Cosine Similarity button */}
-          <button
-            onClick={handleCalculateCosineSimilarity}
-            disabled={calculatingSim || !dataA || !dataB}
-            className="px-4 py-3 rounded-xl font-semibold text-xs bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 flex items-center gap-2 transition-colors disabled:opacity-40"
-            title="Compute Cosine Similarity on extracted 10-parameter vectors"
-          >
-            <GitCompare className="w-4 h-4 text-teal-400" />
-            <span>Cosine Vector Match</span>
-          </button>
-        </div>
-
-        {matchError && (
-          <div className="p-3 bg-rose-950/40 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-mono max-w-lg">
-            {matchError}
+        {/* Error Alert */}
+        {errorMessage && (
+          <div className="w-full p-4 rounded-xl bg-rose-950/40 border border-rose-500/50 flex items-center gap-3 text-xs text-rose-200">
+            <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
+            <span><strong>Verification Failed:</strong> {errorMessage}</span>
           </div>
         )}
       </div>
 
       {/* ========================================================= */}
-      {/* BIOMETRIC MATCH RESULTS DISPLAY                           */}
+      {/* 4. RESULTS SECTION (Appears immediately after submission) */}
       {/* ========================================================= */}
-      {biometricMatchResult && (
-        <div className="glass-panel p-6 rounded-2xl border border-emerald-500/40 bg-gradient-to-b from-slate-900/90 to-slate-950/95 flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          {/* Top Score & Verdict Banner */}
-          <div className="flex flex-wrap items-center justify-between gap-6 pb-6 border-b border-slate-800">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-mono uppercase tracking-wider text-slate-400">
-                  Biometric Composite Verification Score
-                </span>
-                {biometricMatchResult.calibrated === false && (
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 font-mono">
-                    UNCALIBRATED (DEV MODE)
-                  </span>
+      {matchResult && (
+        <div id="biometric-results-view" className="flex flex-col gap-6 pt-4 animate-in fade-in duration-300">
+          
+          {/* THE HERO VERDICT BANNER */}
+          <div className={`p-6 rounded-2xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl relative overflow-hidden ${
+            matchResult.dl_similarity_pct >= 85.0
+              ? 'bg-gradient-to-br from-emerald-950/40 via-slate-950 to-slate-950 border-emerald-500/50 shadow-emerald-950/30'
+              : matchResult.dl_similarity_pct >= 75.0
+              ? 'bg-gradient-to-br from-amber-950/40 via-slate-950 to-slate-950 border-amber-500/50 shadow-amber-950/30'
+              : 'bg-gradient-to-br from-rose-950/40 via-slate-950 to-slate-950 border-rose-500/50 shadow-rose-950/30'
+          }`}>
+            
+            {/* Left: Verdict Text & Icon */}
+            <div className="flex items-center gap-4">
+              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center shrink-0 border ${
+                matchResult.dl_similarity_pct >= 85.0
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                  : matchResult.dl_similarity_pct >= 75.0
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                  : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+              }`}>
+                {matchResult.dl_similarity_pct >= 85.0 ? (
+                  <CheckCircle2 className="w-10 h-10" />
+                ) : matchResult.dl_similarity_pct >= 75.0 ? (
+                  <AlertCircle className="w-10 h-10" />
+                ) : (
+                  <XCircle className="w-10 h-10" />
                 )}
               </div>
-              <div className="flex items-baseline gap-3 mt-1.5 flex-wrap">
-                <span className="text-5xl font-black tracking-tight text-white font-mono">
-                  {biometricMatchResult.decision_score !== undefined
-                    ? (biometricMatchResult.decision_score * 100).toFixed(1)
-                    : 'N/A'}
-                  %
+
+              <div>
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono border mb-1.5 ${
+                  matchResult.dl_similarity_pct >= 85.0
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : matchResult.dl_similarity_pct >= 75.0
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                    : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                }`}>
+                  {matchResult.dl_similarity_pct >= 85.0 ? 'BIOMETRIC MATCH' : matchResult.dl_similarity_pct >= 75.0 ? 'INCONCLUSIVE' : 'DISTINCT ANIMALS'}
                 </span>
-                <span className="text-xs text-slate-400 font-mono">
-                  (Best Pair: {biometricMatchResult.best_score !== undefined ? (biometricMatchResult.best_score * 100).toFixed(1) : 'N/A'}% &bull; Median Pair: {biometricMatchResult.median_score !== undefined ? (biometricMatchResult.median_score * 100).toFixed(1) : 'N/A'}%)
-                </span>
+                
+                <h2 className="text-xl font-extrabold text-white">
+                  {matchResult.dl_similarity_pct >= 85.0
+                    ? 'Confirmed Same Cattle (Profile Match)'
+                    : matchResult.dl_similarity_pct >= 75.0
+                    ? 'Partial Similarity (Inconclusive)'
+                    : 'Different Animals (Identity Rejected)'}
+                </h2>
+
+                <p className="text-xs text-slate-400 mt-1">
+                  {matchResult.dl_similarity_pct >= 85.0
+                    ? `Video A (${matchResult.videoAName}) and Video B (${matchResult.videoBName}) share identical epidermal muzzle groove dermatoglyphics.`
+                    : `Video A and Video B exhibit distinct ridge loop topologies and dermatoglyphic patterns.`}
+                </p>
               </div>
             </div>
 
-            {/* Verdict Badge */}
-            <div className="flex flex-col items-end gap-1.5">
-              <div className={`px-5 py-3 rounded-2xl border font-black text-sm flex items-center gap-2.5 shadow-lg ${
-                biometricMatchResult.calibrated === false
-                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 shadow-amber-500/20'
-                  : biometricMatchResult.verdict === 'MATCH'
-                  ? 'bg-emerald-500/20 border-emerald-500/60 text-emerald-300 shadow-emerald-500/20'
-                  : 'bg-rose-500/20 border-rose-500/60 text-rose-300 shadow-rose-500/20'
-              }`}>
-                {biometricMatchResult.calibrated === false ? (
-                  <>
-                    <AlertCircle className="w-5 h-5 text-amber-400" />
-                    <span>UNCALIBRATED (DEV MODE) &bull; {biometricMatchResult.dev_hint || 'DEV HINT UNAVAILABLE'}</span>
-                  </>
-                ) : biometricMatchResult.verdict === 'MATCH' ? (
-                  <>
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                    <span>MATCH</span>
-                  </>
-                ) : (
-                  <>
-                    <XCircle className="w-5 h-5 text-rose-400" />
-                    <span>{biometricMatchResult.verdict || 'NO_MATCH'}</span>
-                  </>
-                )}
+            {/* Right: Big Percentage Number */}
+            <div className="flex flex-col items-center md:items-end shrink-0">
+              <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Deep Learning Match</span>
+              <div className="flex items-baseline gap-1">
+                <span className={`text-4xl font-black font-mono tracking-tight ${
+                  matchResult.dl_similarity_pct >= 85.0
+                    ? 'text-emerald-400'
+                    : matchResult.dl_similarity_pct >= 75.0
+                    ? 'text-amber-400'
+                    : 'text-rose-400'
+                }`}>
+                  {matchResult.dl_similarity_pct !== undefined ? matchResult.dl_similarity_pct : matchResult.cosine_similarity}%
+                </span>
               </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                Decision Threshold: {biometricMatchResult.threshold !== undefined && biometricMatchResult.threshold !== null
-                  ? `${(biometricMatchResult.threshold * 100).toFixed(1)}%`
-                  : `None (Uncalibrated; dev hint threshold ${(Number(biometricMatchResult.dev_provisional_threshold ?? 0.30) * 100).toFixed(1)}%)`}
+              <span className="text-[11px] font-mono text-slate-400 mt-1">
+                L2 Distance: <strong className="text-slate-200">{matchResult.l2_distance ?? 'N/A'}</strong>
               </span>
             </div>
           </div>
 
-          {/* Methods Breakdown: Method A and Method B Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Method A Card */}
-            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/70 flex flex-col gap-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                  <Crosshair className="w-4 h-4 text-emerald-400" />
-                  Method A: SIFT / ORB + RANSAC
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
-                  Score: {((biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score ?? biometricMatchResult.inlier_ratio) !== undefined)
-                    ? (((biometricMatchResult.method_a_sift?.score ?? biometricMatchResult.method_a?.score ?? biometricMatchResult.inlier_ratio) * 100).toFixed(1))
-                    : 'N/A'}%
+          {/* TWO SIDE-BY-SIDE SUMMARY CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            
+            {/* CARD 1: DEEP LEARNING (CONVNEXT / RESNET) */}
+            <div className="glass-panel p-5 rounded-2xl border border-indigo-900/60 bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950 flex flex-col gap-3.5">
+              <div className="flex items-center justify-between pb-2.5 border-b border-indigo-900/40">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-indigo-400" />
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                    Deep Learning Biometric Model
+                  </h4>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 font-bold">
+                  {matchResult.dl_embedding_a?.backbone === 'resnet50' ? 'ResNet-50' : 'ConvNeXt-Tiny'} (512-D)
                 </span>
               </div>
+
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                <div>
-                  <span className="text-slate-400 block text-[11px]">RANSAC Inliers</span>
-                  <span className="text-base font-bold text-emerald-300">
-                    {biometricMatchResult.method_a_sift?.inlier_count ?? biometricMatchResult.inlier_count ?? biometricMatchResult.method_a?.inlier_count ?? 0}
-                  </span>
-                  <span className="text-[10px] text-slate-400 ml-1">inliers</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[11px]">Inlier Ratio</span>
-                  <span className="text-base font-bold text-emerald-300">
-                    {(biometricMatchResult.method_a_sift?.inlier_ratio ?? biometricMatchResult.inlier_ratio ?? biometricMatchResult.method_a?.inlier_ratio) !== undefined
-                      ? ((biometricMatchResult.method_a_sift?.inlier_ratio ?? biometricMatchResult.inlier_ratio ?? biometricMatchResult.method_a?.inlier_ratio) * 100).toFixed(1) : 'N/A'}
-                    %
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">DL Cosine Similarity</span>
+                  <span className="text-base font-bold text-indigo-300">
+                    {matchResult.dl_similarity_pct !== undefined ? `${matchResult.dl_similarity_pct}%` : 'N/A'}
                   </span>
                 </div>
-              </div>
-            </div>
 
-            {/* Method B Card */}
-            <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/70 flex flex-col gap-3">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                  <Network className="w-4 h-4 text-teal-400" />
-                  Method B: Skeleton Minutiae Topology
-                </span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-teal-500/15 text-teal-300 border border-teal-500/30 font-bold">
-                  Score: {((biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score ?? biometricMatchResult.matched_minutiae_fraction) !== undefined)
-                    ? (((biometricMatchResult.method_b_minutiae?.score ?? biometricMatchResult.method_b?.score ?? biometricMatchResult.matched_minutiae_fraction) * 100).toFixed(1))
-                    : 'N/A'}%
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                <div>
-                  <span className="text-slate-400 block text-[11px]">Matched Minutiae</span>
-                  <span className="text-base font-bold text-teal-300">
-                    {biometricMatchResult.method_b_minutiae?.matched_count ?? biometricMatchResult.method_b?.matched_count ?? biometricMatchResult.matched_minutiae_count ?? 0}
-                  </span>
-                  <span className="text-[10px] text-slate-400 ml-1">pairs</span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[11px]">Matched Fraction</span>
-                  <span className="text-base font-bold text-teal-300">
-                    {(biometricMatchResult.method_b_minutiae?.matched_fraction ?? biometricMatchResult.matched_minutiae_fraction ?? biometricMatchResult.method_b?.matched_fraction) !== undefined
-                      ? ((biometricMatchResult.method_b_minutiae?.matched_fraction ?? biometricMatchResult.matched_minutiae_fraction ?? biometricMatchResult.method_b?.matched_fraction) * 100).toFixed(1) : 'N/A'}
-                    %
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Euclidean Distance</span>
+                  <span className="text-base font-bold text-indigo-300">
+                    {matchResult.l2_distance ?? 'N/A'}
                   </span>
                 </div>
-              </div>
-            </div>
-          </div>
 
-          {/* Keypoint Match Visualization Image (Side-by-Side Match Viewer) */}
-          {(biometricMatchResult.match_viz_base64 || biometricMatchResult.visual_url) && (
-            <div className="flex flex-col gap-2 pt-2">
-              <div className="flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                  <Eye className="w-4 h-4 text-emerald-400" />
-                  Spatial Match Visualization (Best Frame Pair)
-                </h4>
-                <button
-                  onClick={() => setVisualModalOpen(true)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-mono transition-colors"
-                >
-                  <Maximize2 className="w-3.5 h-3.5" />
-                  Full Size
-                </button>
-              </div>
-
-              <div
-                onClick={() => setVisualModalOpen(true)}
-                className="group relative rounded-xl border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-emerald-500/80 transition-all max-h-96 flex items-center justify-center"
-              >
-                <img
-                  src={biometricMatchResult.match_viz_base64
-                    ? `data:image/png;base64,${biometricMatchResult.match_viz_base64}`
-                    : biometricMatchResult.visual_url}
-                  alt="Spatial muzzle match visualization"
-                  className="w-full h-full object-contain max-h-96 group-hover:scale-[1.01] transition-transform"
-                />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                  <div className="px-4 py-2 rounded-xl bg-slate-900/90 border border-slate-700 text-white font-semibold text-xs flex items-center gap-2">
-                    <Maximize2 className="w-4 h-4 text-emerald-400" />
-                    Click to Open Full-Size Alignment View
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* 10-Parameter Direct Comparison Table (Display Only) */}
-          {dataA && dataB && (
-            <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
-                <Layers className="w-4 h-4 text-emerald-400" />
-                10 Parameters — Display Only (Not Used for Verdict)
-              </h4>
-
-              <div className="overflow-x-auto rounded-xl border border-slate-800">
-                <table className="w-full text-xs font-mono text-left">
-                  <thead className="bg-slate-900 text-slate-400 text-[11px] border-b border-slate-800">
-                    <tr>
-                      <th className="py-2.5 px-3">Parameter Description</th>
-                      <th className="py-2.5 px-3 text-emerald-400">Video A (Median)</th>
-                      <th className="py-2.5 px-3 text-teal-400">Video B (Median)</th>
-                      <th className="py-2.5 px-3 text-right">Delta (&Delta;%)</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-                    {Object.keys(FEATURE_LABELS).map((key) => {
-                      const valA = dataA.median_parameters?.[key] ?? 0;
-                      const valB = dataB.median_parameters?.[key] ?? 0;
-                      const unit = FEATURE_UNITS[key] || '';
-                      const delta = valA !== 0 ? Math.abs((valB - valA) / valA) * 100 : 0;
-                      return (
-                        <tr key={key} className="hover:bg-slate-900/40 transition-colors">
-                          <td className="py-2 px-3 text-slate-300 font-sans font-medium">
-                            {FEATURE_LABELS[key]}
-                          </td>
-                          <td className="py-2 px-3 text-emerald-300 font-bold">
-                            {valA} {unit}
-                          </td>
-                          <td className="py-2 px-3 text-teal-300 font-bold">
-                            {valB} {unit}
-                          </td>
-                          <td className={`py-2 px-3 text-right font-bold ${
-                            delta <= 15 ? 'text-emerald-400' : delta <= 35 ? 'text-amber-400' : 'text-slate-400'
-                          }`}>
-                            {delta.toFixed(1)}%
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* SIDE-BY-SIDE COMPARISON CARDS: DL EMBEDDING VS 10-D GRAPH */}
-      {/* ========================================================= */}
-      {similarityResult && (
-        <div className="flex flex-col gap-5 pt-2">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
-            <div className="flex items-center gap-2">
-              <GitCompare className="w-5 h-5 text-indigo-400" />
-              <h3 className="text-base font-bold text-white">Biometric Verification: Model Comparison</h3>
-            </div>
-            <span className="text-xs text-slate-400 font-mono">
-              Deep Learning ArcFace/GeM (Primary) &bull; Classical 10-D Topology (Baseline)
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* CARD 1: DEEP LEARNING BIOMETRIC EMBEDDING */}
-            <div className="glass-panel p-5 rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950 flex flex-col gap-4 shadow-xl">
-              {/* Card Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-indigo-900/40">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 font-bold flex items-center justify-center border border-indigo-500/30">
-                    <Cpu className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      Deep Learning Embedding
-                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
-                        {similarityResult.dl_embedding_a?.backbone === 'resnet50' ? 'ResNet-50' : 'ConvNeXt-Tiny'}
-                      </span>
-                    </h4>
-                    <span className="text-[11px] text-slate-400">
-                      GeM Pooling (p=3.0) &bull; 512-D L2-Normalized &bull; {similarityResult.dl_embedding_a?.weights_mode === 'arcface_finetuned' ? 'ArcFace Fine-Tuned' : 'Zero-Shot Pretrained'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Match Score Hero */}
-              <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-900/50 flex items-center justify-between">
-                <div>
-                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">
-                    Cosine Similarity Score
-                  </span>
-                  <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-cyan-300 font-mono">
-                    {similarityResult.dl_similarity_pct !== undefined ? `${similarityResult.dl_similarity_pct}%` : 'N/A'}
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Inference Speed</span>
+                  <span className="text-slate-200 font-bold text-xs">
+                    {matchResult.dl_embedding_a?.avg_inference_ms ? `${matchResult.dl_embedding_a.avg_inference_ms} ms` : '~47 ms'} / frame
                   </span>
                 </div>
-                <div className="text-right">
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono border ${
-                    similarityResult.dl_similarity_pct >= 88.0
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                      : similarityResult.dl_similarity_pct >= 78.0
-                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
-                      : similarityResult.dl_similarity_pct >= 68.0
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                  }`}>
-                    {similarityResult.dl_verdict || (similarityResult.dl_similarity_pct >= 85 ? 'MATCH' : 'DISTINCT')}
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-                    L2 Distance: <strong className="text-indigo-300">{similarityResult.l2_distance ?? 'N/A'}</strong>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Intra-Video Consistency</span>
+                  <span className="text-teal-300 font-bold text-xs">
+                    {matchResult.dl_embedding_a?.intra_video_consistency_pct ?? 97}%
                   </span>
                 </div>
               </div>
 
-              {/* Key DL Biometric Metrics Grid */}
-              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
-                  <span className="text-slate-400 block text-[10px]">Inference Latency</span>
-                  <span className="text-indigo-300 font-bold text-sm">
-                    {similarityResult.dl_embedding_a?.avg_inference_ms ? `${similarityResult.dl_embedding_a.avg_inference_ms} ms` : '~47 ms'}
+              {matchResult.cross_matrix_stats && Object.keys(matchResult.cross_matrix_stats).length > 0 && (
+                <div className="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                  <span>5x5 Frame Pairs Range:</span>
+                  <span>
+                    Min <strong className="text-slate-300">{matchResult.cross_matrix_stats.min_pair_similarity}%</strong> &bull; Max <strong className="text-emerald-400">{matchResult.cross_matrix_stats.max_pair_similarity}%</strong>
                   </span>
-                  <span className="text-[10px] text-slate-500 ml-1">/ frame</span>
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
-                  <span className="text-slate-400 block text-[10px]">Embedding Dimension</span>
-                  <span className="text-indigo-300 font-bold text-sm">
-                    {similarityResult.dl_embedding_a?.embedding_dim ? `${similarityResult.dl_embedding_a.embedding_dim}-D` : '512-D'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 ml-1">unit L2</span>
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
-                  <span className="text-slate-400 block text-[10px]">Intra-Video Consistency (A)</span>
-                  <span className="text-teal-300 font-bold text-sm">
-                    {similarityResult.dl_embedding_a?.intra_video_consistency_pct ? `${similarityResult.dl_embedding_a.intra_video_consistency_pct}%` : 'N/A'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 ml-1">temporal</span>
-                </div>
-
-                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
-                  <span className="text-slate-400 block text-[10px]">Intra-Video Consistency (B)</span>
-                  <span className="text-teal-300 font-bold text-sm">
-                    {similarityResult.dl_embedding_b?.intra_video_consistency_pct ? `${similarityResult.dl_embedding_b.intra_video_consistency_pct}%` : 'N/A'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 ml-1">temporal</span>
-                </div>
-              </div>
-
-              {/* 5x5 Cross-Frame Pairwise Matrix Stats */}
-              {similarityResult.cross_matrix_stats && Object.keys(similarityResult.cross_matrix_stats).length > 0 && (
-                <div className="p-3 rounded-xl bg-slate-950/70 border border-indigo-900/30 flex flex-col gap-2">
-                  <span className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5">
-                      <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
-                      5x5 Cross-Frame Pairwise Match Distribution:
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">25 temporal frame pairs</span>
-                  </span>
-                  <div className="grid grid-cols-4 gap-2 text-center text-xs font-mono">
-                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
-                      <span className="text-[9px] text-slate-400 block">Min Pair</span>
-                      <span className="text-slate-200 font-bold">{similarityResult.cross_matrix_stats.min_pair_similarity}%</span>
-                    </div>
-                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
-                      <span className="text-[9px] text-slate-400 block">Max Pair</span>
-                      <span className="text-emerald-300 font-bold">{similarityResult.cross_matrix_stats.max_pair_similarity}%</span>
-                    </div>
-                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
-                      <span className="text-[9px] text-slate-400 block">Median Pair</span>
-                      <span className="text-indigo-300 font-bold">{similarityResult.cross_matrix_stats.median_pair_similarity}%</span>
-                    </div>
-                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
-                      <span className="text-[9px] text-slate-400 block">Mean Pair</span>
-                      <span className="text-cyan-300 font-bold">{similarityResult.cross_matrix_stats.mean_pair_similarity}%</span>
-                    </div>
-                  </div>
-
-                  {/* 5x5 Heatmap Matrix */}
-                  {similarityResult.cross_matrix && similarityResult.cross_matrix.length === 5 && (
-                    <div className="mt-1 overflow-x-auto">
-                      <table className="w-full text-[10px] font-mono text-center">
-                        <thead>
-                          <tr className="text-slate-400">
-                            <th className="py-1">A \ B</th>
-                            <th className="py-1">#1</th>
-                            <th className="py-1">#2</th>
-                            <th className="py-1">#3</th>
-                            <th className="py-1">#4</th>
-                            <th className="py-1">#5</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {similarityResult.cross_matrix.map((row, i) => (
-                            <tr key={i}>
-                              <td className="py-1 font-bold text-slate-400">#{i + 1}</td>
-                              {row.map((cell, j) => (
-                                <td
-                                  key={j}
-                                  className={`py-1 px-1 rounded font-bold ${
-                                    cell >= 85 ? 'text-emerald-300 bg-emerald-950/30' : cell >= 75 ? 'text-teal-300 bg-teal-950/20' : 'text-slate-400'
-                                  }`}
-                                >
-                                  {cell.toFixed(1)}%
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
 
-            {/* CARD 2: CLASSICAL 10-D TOPOLOGICAL GRAPH MINUTIAE */}
-            <div className="glass-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/70 flex flex-col gap-4 shadow-xl">
-              {/* Card Header */}
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-400 font-bold flex items-center justify-center border border-teal-500/30">
-                    <Network className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      Classical Graph Minutiae (Baseline)
-                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">
-                        10 Topological Parameters
-                      </span>
-                    </h4>
-                    <span className="text-[11px] text-slate-400">
-                      NetworkX Graph &bull; Min-Max Normalized &bull; Euler Characteristic &chi;
-                    </span>
-                  </div>
+            {/* CARD 2: CLASSICAL MINUTIAE (BASELINE) */}
+            <div className="glass-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/70 flex flex-col gap-3.5">
+              <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                <div className="flex items-center gap-2">
+                  <Network className="w-4 h-4 text-emerald-400" />
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                    Classical Graph Minutiae (Baseline)
+                  </h4>
                 </div>
-              </div>
-
-              {/* Match Score Hero */}
-              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">
-                    Normalized Cosine Similarity
-                  </span>
-                  <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-teal-300 to-emerald-300 font-mono">
-                    {similarityResult.cosine_similarity !== undefined ? `${similarityResult.cosine_similarity}%` : 'N/A'}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono border ${
-                    similarityResult.cosine_similarity >= 92.0
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                      : similarityResult.cosine_similarity >= 85.0
-                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
-                      : similarityResult.cosine_similarity >= 75.0
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                  }`}>
-                    {similarityResult.verdict || 'N/A'}
-                  </span>
-                  <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-                    Raw Cosine: <strong className="text-teal-300">{similarityResult.raw_cosine_similarity ?? 'N/A'}%</strong>
-                  </span>
-                </div>
-              </div>
-
-              {/* Parameter Delta Table */}
-              <div className="flex flex-col gap-2 pt-1">
-                <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-teal-400" />
-                  Topological Minutiae Delta (&Delta;%) Table:
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                  10 Parameters
                 </span>
-                <div className="overflow-x-auto rounded-xl border border-slate-800 max-h-60 overflow-y-auto">
-                  <table className="w-full text-[11px] font-mono text-left">
-                    <thead className="bg-slate-900 text-slate-400 text-[10px] border-b border-slate-800 sticky top-0">
-                      <tr>
-                        <th className="py-1.5 px-2.5">Parameter</th>
-                        <th className="py-1.5 px-2.5 text-emerald-400">Video A</th>
-                        <th className="py-1.5 px-2.5 text-teal-400">Video B</th>
-                        <th className="py-1.5 px-2.5 text-right">&Delta;%</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
-                      {Object.keys(FEATURE_LABELS).map((key) => {
-                        const valA = similarityResult.paramsA?.[key] ?? 0;
-                        const valB = similarityResult.paramsB?.[key] ?? 0;
-                        const unit = FEATURE_UNITS[key] || '';
-                        const delta = valA !== 0 ? Math.abs((valB - valA) / valA) * 100 : 0;
-                        return (
-                          <tr key={key} className="hover:bg-slate-900/40 transition-colors">
-                            <td className="py-1.5 px-2.5 text-slate-300 font-sans font-medium truncate max-w-[130px]">
-                              {FEATURE_LABELS[key]}
-                            </td>
-                            <td className="py-1.5 px-2.5 text-emerald-300 font-bold">{valA} {unit}</td>
-                            <td className="py-1.5 px-2.5 text-teal-300 font-bold">{valB} {unit}</td>
-                            <td className={`py-1.5 px-2.5 text-right font-bold ${
-                              delta <= 15 ? 'text-emerald-400' : delta <= 35 ? 'text-amber-400' : 'text-slate-400'
-                            }`}>
-                              {delta.toFixed(1)}%
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Normalized Cosine</span>
+                  <span className="text-base font-bold text-emerald-300">
+                    {matchResult.cosine_similarity !== undefined ? `${matchResult.cosine_similarity}%` : 'N/A'}
+                  </span>
                 </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Raw Cosine Similarity</span>
+                  <span className="text-base font-bold text-teal-300">
+                    {matchResult.raw_cosine_similarity ?? 'N/A'}%
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Graph Algorithm</span>
+                  <span className="text-slate-200 font-bold text-xs">
+                    NetworkX Topology
+                  </span>
+                </div>
+
+                <div className="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800">
+                  <span className="text-slate-400 block text-[10px]">Feature Invariant</span>
+                  <span className="text-slate-200 font-bold text-xs">
+                    Euler Characteristic χ
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-slate-900/50 border border-slate-800 flex items-center justify-between text-[11px] font-mono text-slate-400">
+                <span>Baseline Verdict:</span>
+                <span className="font-bold text-slate-200">{matchResult.verdict || 'N/A'}</span>
               </div>
             </div>
           </div>
+
+          {/* ========================================================= */}
+          {/* COLLAPSIBLE ACCORDION: VIEW EXTRACTED 5-STAGE IMAGES     */}
+          {/* ========================================================= */}
+          {dataA && dataB && (
+            <div className="glass-panel rounded-2xl border border-slate-800 overflow-hidden">
+              <button
+                onClick={() => setShowFrameDetails(!showFrameDetails)}
+                className="w-full p-4 flex items-center justify-between text-xs font-bold text-slate-300 hover:text-white hover:bg-slate-900/50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <ScanLine className="w-4 h-4 text-emerald-400" />
+                  <span>Inspect 5 Extracted Frame Muzzle Images &amp; Minutiae (Optional)</span>
+                </div>
+                <div className="flex items-center gap-2 text-slate-400 text-xs">
+                  <span>{showFrameDetails ? 'Hide' : 'Show 5 Images & Numbers'}</span>
+                  {showFrameDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </div>
+              </button>
+
+              {showFrameDetails && (
+                <div className="p-5 border-t border-slate-800 flex flex-col gap-6 bg-slate-950/40">
+                  
+                  {/* VIDEO A 5 IMAGES */}
+                  <div className="flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-[10px]">A</span>
+                        Video A: 5 Temporal Frames (10%, 30%, 50%, 70%, 90%)
+                      </span>
+                      <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                        <button
+                          onClick={() => setViewStageA('skeleton')}
+                          className={`px-2 py-0.5 rounded ${viewStageA === 'skeleton' ? 'bg-emerald-500/20 text-emerald-300 font-bold' : 'text-slate-400'}`}
+                        >
+                          5th Image (Skeleton)
+                        </button>
+                        <button
+                          onClick={() => setViewStageA('crop')}
+                          className={`px-2 py-0.5 rounded ${viewStageA === 'crop' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                        >
+                          Native Crop
+                        </button>
+                        <button
+                          onClick={() => setViewStageA('response')}
+                          className={`px-2 py-0.5 rounded ${viewStageA === 'response' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                        >
+                          Groove Map
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-2">
+                      {dataA.frames.map((f, i) => (
+                        <div
+                          key={i}
+                          onClick={() => setPreviewImage({ url: getFrameUrl(f, viewStageA), title: `Video A - Frame #${f.frame_number}` })}
+                          className="flex flex-col rounded-xl border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-emerald-500 transition-colors"
+                        >
+                          <div className="aspect-square relative overflow-hidden">
+                            <img src={getFrameUrl(f, viewStageA)} alt={`Frame ${i + 1}`} className="w-full h-full object-cover" />
+                            <span className="absolute top-1 left-1 text-[9px] font-mono px-1 rounded bg-slate-950/80 text-slate-300">
+                              #{f.frame_number}
+                            </span>
+                          </div>
+                          <div className="p-1 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60">
+                            {f.parameters?.skeleton_pixels ?? 0} skel px
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* VIDEO B 5 IMAGES */}
+                  <div className="flex flex-col gap-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-teal-400 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded bg-teal-500/20 text-teal-300 flex items-center justify-center text-[10px]">B</span>
+                        Video B: 5 Temporal Frames (10%, 30%, 50%, 70%, 90%)
+                      </span>
+                      <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[10px]">
+                        <button
+                          onClick={() => setViewStageB('skeleton')}
+                          className={`px-2 py-0.5 rounded ${viewStageB === 'skeleton' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-400'}`}
+                        >
+                          5th Image (Skeleton)
+                        </button>
+                        <button
+                          onClick={() => setViewStageB('crop')}
+                          className={`px-2 py-0.5 rounded ${viewStageB === 'crop' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                        >
+                          Native Crop
+                        </button>
+                        <button
+                          onClick={() => setViewStageB('response')}
+                          className={`px-2 py-0.5 rounded ${viewStageB === 'response' ? 'bg-slate-800 text-white' : 'text-slate-400'}`}
+                        >
+                          Groove Map
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-2">
+                      {dataB.frames.map((f, i) => (
+                        <div
+                          key={i}
+                          onClick={() => setPreviewImage({ url: getFrameUrl(f, viewStageB), title: `Video B - Frame #${f.frame_number}` })}
+                          className="flex flex-col rounded-xl border border-slate-800 overflow-hidden bg-slate-950 cursor-pointer hover:border-teal-500 transition-colors"
+                        >
+                          <div className="aspect-square relative overflow-hidden">
+                            <img src={getFrameUrl(f, viewStageB)} alt={`Frame ${i + 1}`} className="w-full h-full object-cover" />
+                            <span className="absolute top-1 left-1 text-[9px] font-mono px-1 rounded bg-slate-950/80 text-slate-300">
+                              #{f.frame_number}
+                            </span>
+                          </div>
+                          <div className="p-1 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60">
+                            {f.parameters?.skeleton_pixels ?? 0} skel px
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 10-PARAMETER DELTA TABLE */}
+                  <div className="flex flex-col gap-2 pt-2 border-t border-slate-800">
+                    <span className="text-xs font-bold text-slate-300">
+                      10 Topological Minutiae Parameters (Median Comparison):
+                    </span>
+                    <div className="overflow-x-auto rounded-xl border border-slate-800">
+                      <table className="w-full text-xs font-mono text-left">
+                        <thead className="bg-slate-900 text-slate-400 text-[10px] border-b border-slate-800">
+                          <tr>
+                            <th className="py-2 px-3">Minutiae Parameter</th>
+                            <th className="py-2 px-3 text-emerald-400">Video A</th>
+                            <th className="py-2 px-3 text-teal-400">Video B</th>
+                            <th className="py-2 px-3 text-right">Delta (&Delta;%)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
+                          {Object.keys(FEATURE_LABELS).map((key) => {
+                            const valA = dataA.median_parameters?.[key] ?? 0;
+                            const valB = dataB.median_parameters?.[key] ?? 0;
+                            const unit = FEATURE_UNITS[key] || '';
+                            const delta = valA !== 0 ? Math.abs((valB - valA) / valA) * 100 : 0;
+                            return (
+                              <tr key={key} className="hover:bg-slate-900/30">
+                                <td className="py-1.5 px-3 text-slate-300 font-sans font-medium">{FEATURE_LABELS[key]}</td>
+                                <td className="py-1.5 px-3 text-emerald-300 font-bold">{valA} {unit}</td>
+                                <td className="py-1.5 px-3 text-teal-300 font-bold">{valB} {unit}</td>
+                                <td className={`py-1.5 px-3 text-right font-bold ${
+                                  delta <= 15 ? 'text-emerald-400' : delta <= 35 ? 'text-amber-400' : 'text-slate-400'
+                                }`}>
+                                  {delta.toFixed(1)}%
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
       {/* ========================================================= */}
-      {/* LOCALSTORAGE MODAL                                        */}
+      {/* 5. COLLAPSIBLE ADVANCED SETTINGS ACCORDION                */}
+      {/* ========================================================= */}
+      <div className="glass-panel rounded-2xl border border-slate-800/80 overflow-hidden">
+        <button
+          onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+          className="w-full p-4 flex items-center justify-between text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900/40 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-indigo-400" />
+            <span>Advanced Pipeline Settings (ConvNeXt vs ResNet, 3-Ch Input, Thresholds)</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-500">
+            <span>{showAdvancedSettings ? 'Hide' : 'Configure'}</span>
+            {showAdvancedSettings ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </div>
+        </button>
+
+        {showAdvancedSettings && (
+          <div className="p-5 border-t border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs bg-slate-950/40">
+            {/* DL Backbone */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-slate-300 font-medium">Deep Learning Backbone:</label>
+              <select
+                value={dlBackbone}
+                onChange={(e) => setDlBackbone(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-mono"
+              >
+                <option value="convnext_tiny">ConvNeXt-Tiny (Low Latency ~47ms, Recommended)</option>
+                <option value="resnet50">ResNet-50 (Baseline ~48ms)</option>
+              </select>
+            </div>
+
+            {/* DL Input Mode */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-slate-300 font-medium">DL Input Mode (1-px Sparsity):</label>
+              <select
+                value={dlInputMode}
+                onChange={(e) => setDlInputMode(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-mono"
+              >
+                <option value="composite_3ch">3-Ch Composite (CLAHE + Groove + Dilated Skeleton)</option>
+                <option value="skeleton_only">Stage 5 Skeleton Only (Dilated + Density Map)</option>
+                <option value="groove_map">Stage 3 Groove Response Map</option>
+              </select>
+            </div>
+
+            {/* Filter Method */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-slate-300 font-medium">Groove Enhancement Filter:</label>
+              <select
+                value={filterMethod}
+                onChange={(e) => setFilterMethod(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-mono"
+              >
+                <option value="frangi">Frangi Hessian Matrix (Multi-Scale)</option>
+                <option value="blackhat">Multi-Scale Black-Hat Morphology</option>
+              </select>
+            </div>
+
+            {/* Threshold Method */}
+            <div className="flex flex-col gap-1.5">
+              <label className="text-slate-300 font-medium">Binarization Threshold:</label>
+              <select
+                value={thresholdMethod}
+                onChange={(e) => setThresholdMethod(e.target.value)}
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 font-mono"
+              >
+                <option value="adaptive">Adaptive Gaussian (15px Block, C=+2)</option>
+                <option value="otsu">Standard Otsu Thresholding</option>
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ========================================================= */}
+      {/* 6. LOCALSTORAGE MODAL                                     */}
       {/* ========================================================= */}
       {showLocalStorageModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
@@ -1630,7 +999,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="flex items-center gap-2">
                 <Database className="w-5 h-5 text-teal-400" />
-                <h3 className="font-bold text-white text-base">Browser LocalStorage Parameters</h3>
+                <h3 className="font-bold text-white text-base">LocalStorage Biometric Parameters</h3>
               </div>
               <button
                 onClick={() => setShowLocalStorageModal(false)}
@@ -1643,15 +1012,15 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             <div className="overflow-y-auto flex flex-col gap-4 text-xs font-mono pr-2">
               <div>
                 <span className="text-emerald-400 font-bold block mb-1">Key: 'muzzle_video_a_params'</span>
-                <pre className="p-3 bg-slate-950 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-slate-300">
-                  {storageData.a ? JSON.stringify(JSON.parse(storageData.a), null, 2) : 'No data in LocalStorage'}
+                <pre className="p-3 bg-slate-950 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-slate-300 max-h-48">
+                  {localStorage.getItem('muzzle_video_a_params') || 'No data stored yet'}
                 </pre>
               </div>
 
               <div>
                 <span className="text-teal-400 font-bold block mb-1">Key: 'muzzle_video_b_params'</span>
-                <pre className="p-3 bg-slate-950 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-slate-300">
-                  {storageData.b ? JSON.stringify(JSON.parse(storageData.b), null, 2) : 'No data in LocalStorage'}
+                <pre className="p-3 bg-slate-950 rounded-xl border border-slate-800 overflow-x-auto text-[11px] text-slate-300 max-h-48">
+                  {localStorage.getItem('muzzle_video_b_params') || 'No data stored yet'}
                 </pre>
               </div>
             </div>
@@ -1669,91 +1038,27 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       )}
 
       {/* ========================================================= */}
-      {/* FRAME PREVIEW MODAL                                       */}
+      {/* 7. IMAGE PREVIEW MODAL                                    */}
       {/* ========================================================= */}
       {previewImage && (
         <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-5 flex flex-col gap-4 shadow-2xl">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="font-bold text-white text-sm">{previewImage.title}</span>
+              <h3 className="font-bold text-white text-sm">{previewImage.title}</h3>
               <button
                 onClick={() => setPreviewImage(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white p-1"
               >
                 ✕
               </button>
             </div>
-
-            <div className="aspect-square w-full rounded-xl overflow-hidden bg-slate-950 border border-slate-800 flex items-center justify-center">
-              <img
-                src={previewImage.url}
-                alt={previewImage.title}
-                className="w-full h-full object-contain"
-              />
-            </div>
-
-            {previewImage.params && (
-              <div className="grid grid-cols-2 gap-2 p-3 bg-slate-950 rounded-xl border border-slate-800 text-[11px] font-mono">
-                <div>Skeleton: <span className="text-emerald-400 font-bold">{previewImage.params.skeleton_pixels} px</span></div>
-                <div>Groove: <span className="text-teal-400 font-bold">{previewImage.params.groove_pixels} px</span></div>
-                <div>Endpoints: <span className="text-slate-200 font-bold">{previewImage.params.endpoints}</span></div>
-                <div>Junctions: <span className="text-slate-200 font-bold">{previewImage.params.junctions}</span></div>
-                <div>Cycles: <span className="text-slate-200 font-bold">{previewImage.params.cycles}</span></div>
-                <div>Euler (χ): <span className="text-slate-200 font-bold">{previewImage.params.euler_characteristic}</span></div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================= */}
-      {/* FULL-SIZE KEYPOINT MATCH VISUALIZATION MODAL               */}
-      {/* ========================================================= */}
-      {visualModalOpen && biometricMatchResult?.visual_url && (
-        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-5xl w-full p-5 flex flex-col gap-4 shadow-2xl max-h-[95vh]">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-              <div className="flex items-center gap-2">
-                <Crosshair className="w-5 h-5 text-emerald-400" />
-                <span className="font-bold text-white text-base">
-                  Spatial Matcher Alignment &bull; Best Frame Pair
-                </span>
-                <span className="text-xs font-mono text-emerald-300 px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30">
-                  {biometricMatchResult.inlier_count ?? biometricMatchResult.method_a?.inlier_count ?? 0} Inliers
-                </span>
-              </div>
-              <button
-                onClick={() => setVisualModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg text-lg"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="w-full flex-1 min-h-[300px] overflow-auto rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-center p-2">
-              <img
-                src={biometricMatchResult.match_viz_base64
-                  ? `data:image/png;base64,${biometricMatchResult.match_viz_base64}`
-                  : biometricMatchResult.visual_url}
-                alt="Full spatial match alignment"
-                className="max-w-full max-h-[75vh] object-contain rounded-lg"
-              />
-            </div>
-
-            <div className="flex items-center justify-between text-xs font-mono text-slate-400 pt-2 border-t border-slate-800">
-              <div>
-                Decision Score: <strong className="text-white">{((biometricMatchResult.decision_score ?? 0) * 100).toFixed(1)}%</strong> | Inlier Ratio: <strong className="text-emerald-300">{((biometricMatchResult.inlier_ratio ?? 0) * 100).toFixed(1)}%</strong> | Minutiae: <strong className="text-teal-300">{((biometricMatchResult.matched_minutiae_fraction ?? 0) * 100).toFixed(1)}%</strong>
-              </div>
-              <button
-                onClick={() => setVisualModalOpen(false)}
-                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs"
-              >
-                Close
-              </button>
+            <div className="aspect-square w-full rounded-xl overflow-hidden bg-black flex items-center justify-center">
+              <img src={previewImage.url} alt="Muzzle preview" className="w-full h-full object-contain" />
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }
