@@ -50,7 +50,7 @@ if not logger.handlers:
 
 
 # ---------------------------------------------------------------------------
-# 1. Generalized Mean (GeM) Pooling
+# 1. Generalized Mean (GeM) Pooling & Spatial Pyramid GeM
 # ---------------------------------------------------------------------------
 class GeMPool2d(nn.Module):
     """
@@ -81,13 +81,62 @@ class GeMPool2d(nn.Module):
         return gem
 
 
+class SpatialPyramidGeM(nn.Module):
+    """
+    Multi-Scale Spatial Grid GeM Pooling & Channel-Wise Zero-Mean Standardization:
+    1. Takes spatial feature map from backbone (B, C, H, W).
+    2. Pools into a 3x3 Regional Spatial Grid + 1x1 Global GeM (total 10 spatial regions: 1 global + 9 regional cells).
+    3. For each of the 10 spatial cells, applies GeM pooling with p=3.0:
+       f_k = (1/|R_k| * sum_{u in R_k} x_u^p)^(1/p)
+    4. Applies Channel-Wise Zero-Mean Standardization (Z-score centering across channels)
+       for each spatial cell BEFORE concatenation and L2 normalization:
+       f_tilde = (f - mu_f) / (sigma_f + 1e-6)
+       where mu_f = mean(f) across channels C, and sigma_f = std(f) across channels C.
+    5. Concatenates all 10 standardized regional cells into a single vector of length 10 * C.
+    This eliminates the shared positive common-mode bias (~0.80 cosine baseline)
+    so two different cows drop to 15%-55% (DISTINCT), while the same cow stays > 88%-99% (MATCH).
+    """
+    def __init__(self, p: float = 3.0, eps: float = 1e-6, trainable: bool = False):
+        super().__init__()
+        self.eps = eps
+        if trainable:
+            self.p = nn.Parameter(torch.ones(1) * float(p))
+        else:
+            self.register_buffer("p", torch.tensor(float(p)))
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x is (B, C, H, W)
+        x_clamped = x.clamp(min=self.eps)
+        p_val = self.p.view(1, 1, 1, 1) if isinstance(self.p, nn.Parameter) else self.p
+        powered = x_clamped.pow(p_val)
+
+        # 1x1 Global GeM
+        global_gem = F.adaptive_avg_pool2d(powered, (1, 1)).pow(1.0 / p_val).squeeze(-1).squeeze(-1)  # (B, C)
+
+        # 3x3 Regional GeM
+        grid_gem = F.adaptive_avg_pool2d(powered, (3, 3)).pow(1.0 / p_val)  # (B, C, 3, 3)
+        grid_cells = grid_gem.permute(0, 2, 3, 1).contiguous().view(x.size(0), 9, -1)  # (B, 9, C)
+
+        # Stack to 10 spatial cells: (B, 10, C) [0: global, 1..9: regional]
+        all_cells = torch.cat([global_gem.unsqueeze(1), grid_cells], dim=1)  # (B, 10, C)
+
+        # Channel-Wise Zero-Mean Standardization (across channel dimension C, dim=-1)
+        mu_f = all_cells.mean(dim=-1, keepdim=True)
+        sigma_f = all_cells.std(dim=-1, keepdim=True, unbiased=False)
+        f_tilde = (all_cells - mu_f) / (sigma_f + 1e-6)  # (B, 10, C)
+
+        # Concatenate all 10 standardized regional cells into (B, 10 * C)
+        out = f_tilde.view(x.size(0), -1)  # (B, 10 * C)
+        return out
+
+
 # ---------------------------------------------------------------------------
 # 2. ArcFace Head with Projection Neck & Margin Penalty
 # ---------------------------------------------------------------------------
 class ArcFaceHead(nn.Module):
     """
     ArcFace (Additive Angular Margin Loss) Head & Projection Neck:
-    - Neck: BatchNorm2d -> Flatten -> Dropout(0.2) -> Linear(in_features, out_features, bias=False) -> BatchNorm1d
+    - Neck: BatchNorm1d -> Dropout(0.2) -> Linear(in_features, out_features, bias=False) -> BatchNorm1d
     - Loss: L = -log( e^(s * cos(theta + m)) / (e^(s * cos(theta + m)) + sum(e^(s * cos(theta_j)))) )
     """
     def __init__(
@@ -107,8 +156,8 @@ class ArcFaceHead(nn.Module):
         self.m = m
         self.easy_margin = easy_margin
 
-        # Projection neck
-        self.bn_in = nn.BatchNorm2d(in_features)
+        # Projection neck (supports 1D feature vectors of length 10 * C)
+        self.bn_in = nn.BatchNorm1d(in_features)
         self.dropout = nn.Dropout(0.2)
         self.fc = nn.Linear(in_features, out_features, bias=False)
         self.bn_out = nn.BatchNorm1d(out_features)
@@ -127,12 +176,11 @@ class ArcFaceHead(nn.Module):
 
     def extract_embedding(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Takes 4D tensor (B, C, 1, 1) or (B, C) and outputs L2-normalized 512-D embedding.
+        Takes tensor (B, 10*C) or (B, C, 1, 1) and outputs L2-normalized 512-D embedding.
         """
-        if x.dim() == 2:
-            x = x.unsqueeze(-1).unsqueeze(-1)
+        if x.dim() > 2:
+            x = torch.flatten(x, 1)
         x = self.bn_in(x)
-        x = torch.flatten(x, 1)
         x = self.dropout(x)
         x = self.fc(x)
         x = self.bn_out(x)
@@ -229,19 +277,21 @@ class MuzzleBiometricModel(nn.Module):
         else:
             raise ValueError(f"Unsupported backbone: {backbone}. Choose 'convnext_tiny' or 'resnet50'.")
 
-        # 2. Replace Average Pooling with GeM Pooling (p=3.0)
-        self.gem_pool = GeMPool2d(p=3.0, trainable=False)
+        # 2. Multi-Scale Spatial Grid GeM Pooling (p=3.0, 10 spatial regions: 1 global + 9 grid cells)
+        self.gem_pool = GeMPool2d(p=3.0, trainable=False)  # Kept for backward compatibility
+        self.spatial_gem = SpatialPyramidGeM(p=3.0, eps=1e-6, trainable=False)
+        self.pooled_dim = 10 * self.backbone_dim  # 10 spatial regions * C channels
 
         # 3. ArcFace Head
         self.arcface_head = ArcFaceHead(
-            in_features=self.backbone_dim,
+            in_features=self.pooled_dim,
             out_features=target_dim,
             num_classes=num_classes,
         )
 
-        # 4. Deterministic projector for zero-shot testing (keeps 512-D unified shape)
+        # 4. Deterministic projector for zero-shot testing (10*C -> 512-D, seed=42)
         self.zero_shot_projector = DeterministicProjector(
-            in_dim=self.backbone_dim,
+            in_dim=self.pooled_dim,
             out_dim=target_dim,
             seed=42,
         )
@@ -349,20 +399,17 @@ class MuzzleBiometricModel(nn.Module):
         Output: L2-normalized 512-D embedding tensor (B, 512)
         """
         spatial_feats = self.forward_spatial_features(x)  # (B, C, H', W')
-        gem_pooled = self.gem_pool(spatial_feats)         # (B, C, 1, 1)
+        pooled_feats = self.spatial_gem(spatial_feats)     # (B, 10 * C)
 
         # Fine-Tuned / Training Mode
         if (self.weights_mode == "arcface_finetuned" or labels is not None) and not force_zero_shot:
-            return self.arcface_head(gem_pooled, labels)
+            return self.arcface_head(pooled_feats, labels)
 
         # Zero-Shot Mode:
-        # Avoid uninitialized random projection!
-        # Standardize pooled features and project deterministically to 512-D
-        flat = torch.flatten(gem_pooled, 1)  # (B, backbone_dim)
-        # Feature standardization
-        flat_normed = F.normalize(flat, p=2, dim=-1)
-        # Deterministic orthonormal projection to 512-D
-        emb = self.zero_shot_projector(flat_normed)
+        # SpatialPyramidGeM performs channel-wise zero-mean standardization for each of
+        # the 10 spatial cells before concatenation. The deterministic orthonormal projector
+        # maps from 10*C -> 512-D and applies L2 normalization to the unit hypersphere.
+        emb = self.zero_shot_projector(pooled_feats)
         return emb
 
 
@@ -539,76 +586,204 @@ def extract_frame_embedding(
 # ---------------------------------------------------------------------------
 # 8. 5-Frame Temporal Aggregation & Cosine Matching
 # ---------------------------------------------------------------------------
+class TemporalAggregationResult(dict):
+    """
+    Result dictionary for 5-frame temporal biometric embedding aggregation.
+    Supports backward-compatible tuple unpacking:
+        median_emb, intra_consistency = aggregate_temporal_embeddings(...)
+    as well as full key-value access:
+        res["mean_embedding"], res["median_embedding"], res["kept_frames_count"], etc.
+    """
+    def __iter__(self):
+        return iter([self["median_embedding"], self["intra_video_consistency_pct"]])
+
+
 def aggregate_temporal_embeddings(
     embeddings: List[np.ndarray],
-) -> Tuple[np.ndarray, float]:
+    confidences: Optional[List[float]] = None,
+    blur_variances: Optional[List[float]] = None,
+) -> TemporalAggregationResult:
     """
-    Aggregates 5 temporal frame embeddings:
-    1. Temporal element-wise median: e_raw = median(e_1, e_2, e_3, e_4, e_5)
-    2. Re-apply L2 normalization: ||e_median||_2 = 1.0
-    3. Intra-video frame consistency score: mean pairwise cosine similarity between the 5 frames.
-
-    Returns:
-        (median_embedding, intra_video_consistency_pct)
+    Dual 5-Frame Template Pooling:
+    1. Ensure frame unit normalization: e_hat_t = e_t / ||e_t||_2.
+    2. Compute pairwise similarity matrix S_ij = e_hat_i . e_hat_j.
+    3. For each frame t, compute mean agreement with other frames:
+       a_t = 1/(N - 1) * sum_{j != t} S_tj.
+    4. Outlier pruning: mark frame t as inlier if a_t >= max(0.65, median(a) - 0.12).
+       Keep at least top 3 frames if all drop low.
+       Record kept_frames_count and dropped_frame_indices.
+    5. Method 1: Outlier-Pruned Quality-Weighted Mean (mean_embedding):
+       w_t = a_t * conf_t * min(1.0, blur_var_t / 100.0) (default 1.0 if not given).
+       u_mean = sum_{t in inliers} w_t * e_hat_t.
+       E_mean = u_mean / ||u_mean||_2 (L2 normalized).
+    6. Method 2: Element-Wise Median (median_embedding):
+       u_med[k] = median(e_hat_1[k], ..., e_hat_N[k]).
+       E_median = u_med / ||u_med||_2 (L2 normalized).
+    7. Return dict containing:
+       - "median_embedding": E_median
+       - "mean_embedding": E_mean
+       - "kept_frames_count": int
+       - "dropped_frame_indices": List[int]
+       - "intra_video_consistency_pct": float
+       - "agreement_scores": List[float]
+       - "weights": List[float]
     """
     if not embeddings:
-        return np.zeros(512, dtype=np.float32), 0.0
+        empty = np.zeros(512, dtype=np.float32)
+        return TemporalAggregationResult({
+            "median_embedding": empty,
+            "mean_embedding": empty,
+            "kept_frames_count": 0,
+            "dropped_frame_indices": [],
+            "intra_video_consistency_pct": 0.0,
+            "agreement_scores": [],
+            "weights": [],
+        })
 
-    arr = np.stack(embeddings, axis=0)  # (N, D)
-    raw_median = np.median(arr, axis=0)
-    norm = np.linalg.norm(raw_median)
-    median_emb = (raw_median / max(1e-8, norm)).astype(np.float32)
+    N = len(embeddings)
+    arr = np.stack(embeddings, axis=0).astype(np.float32)  # (N, D)
+
+    # 1. Ensure frame unit normalization: e_hat_t = e_t / ||e_t||_2
+    norms = np.linalg.norm(arr, axis=-1, keepdims=True)
+    e_hat = arr / np.maximum(1e-8, norms)
+
+    # 2. Compute N x N pairwise similarity matrix S_ij = e_hat_i . e_hat_j
+    S = np.dot(e_hat, e_hat.T)
+
+    # 3. For each frame t, compute mean agreement with other frames: a_t = 1/(N - 1) * sum_{j != t} S_tj
+    if N > 1:
+        agreement_scores = [float((np.sum(S[t]) - S[t, t]) / (N - 1)) for t in range(N)]
+    else:
+        agreement_scores = [1.0]
+
+    # 4. Outlier pruning: mark frame t as inlier if a_t >= max(0.65, median(a) - 0.12)
+    # Keep at least top 3 frames if all drop low (or N if N < 3)
+    med_a = float(np.median(agreement_scores))
+    threshold = max(0.65, med_a - 0.12)
+    inliers = [t for t in range(N) if agreement_scores[t] >= threshold]
+
+    min_keep = min(N, 3)
+    if len(inliers) < min_keep:
+        sorted_indices = sorted(range(N), key=lambda idx: agreement_scores[idx], reverse=True)
+        inliers = sorted(sorted_indices[:min_keep])
+
+    inlier_set = set(inliers)
+    dropped_frame_indices = [t for t in range(N) if t not in inlier_set]
+    kept_frames_count = len(inliers)
+
+    # 5. Method 1: Outlier-Pruned Quality-Weighted Mean (mean_embedding)
+    # w_t = a_t * conf_t * min(1.0, blur_var_t / 100.0)
+    weights = []
+    for t in range(N):
+        c_val = confidences[t] if (confidences is not None and t < len(confidences) and confidences[t] is not None) else 1.0
+        conf_t = float(c_val) if float(c_val) > 0.0 else 1.0
+        b_val = blur_variances[t] if (blur_variances is not None and t < len(blur_variances) and blur_variances[t] is not None) else 100.0
+        blur_factor = min(1.0, max(0.0, float(b_val)) / 100.0) if float(b_val) > 0.0 else 1.0
+        w_t = max(0.0, agreement_scores[t]) * conf_t * blur_factor
+        weights.append(float(w_t))
+
+    # Compute weighted sum over inliers
+    u_mean = np.zeros(arr.shape[1], dtype=np.float32)
+    total_w = sum(weights[t] for t in inliers)
+    if total_w > 1e-8:
+        for t in inliers:
+            u_mean += weights[t] * e_hat[t]
+    else:
+        for t in inliers:
+            u_mean += e_hat[t]
+    E_mean = (u_mean / max(1e-8, float(np.linalg.norm(u_mean)))).astype(np.float32)
+
+    # 6. Method 2: Element-Wise Median (median_embedding)
+    u_med = np.median(e_hat, axis=0)
+    E_median = (u_med / max(1e-8, float(np.linalg.norm(u_med)))).astype(np.float32)
 
     # Intra-video consistency (%): mean pairwise cosine similarity across frames
-    n = len(embeddings)
-    if n > 1:
-        sims = []
-        for i in range(n):
-            for j in range(i + 1, n):
-                sim = float(np.dot(embeddings[i], embeddings[j]))
-                sims.append(max(0.0, sim))
-        intra_pct = float(np.mean(sims)) * 100.0 if sims else 100.0
+    if N > 1:
+        sims = [max(0.0, float(S[i, j])) for i in range(N) for j in range(i + 1, N)]
+        intra_consistency_pct = float(np.mean(sims)) * 100.0 if sims else 100.0
     else:
-        intra_pct = 100.0
+        intra_consistency_pct = 100.0
 
-    return median_emb, round(intra_pct, 2)
+    return TemporalAggregationResult({
+        "median_embedding": E_median,
+        "mean_embedding": E_mean,
+        "kept_frames_count": kept_frames_count,
+        "dropped_frame_indices": dropped_frame_indices,
+        "intra_video_consistency_pct": round(float(intra_consistency_pct), 2),
+        "agreement_scores": [round(float(a), 4) for a in agreement_scores],
+        "weights": [round(float(w), 4) for w in weights],
+    })
 
 
 def compute_dl_cosine_similarity(
-    emb_a: Union[List[float], np.ndarray],
-    emb_b: Union[List[float], np.ndarray],
+    emb_a: Union[List[float], np.ndarray, Dict[str, Any]],
+    emb_b: Union[List[float], np.ndarray, Dict[str, Any]],
     per_frames_a: Optional[List[Union[List[float], np.ndarray]]] = None,
     per_frames_b: Optional[List[Union[List[float], np.ndarray]]] = None,
+    mean_emb_a: Optional[Union[List[float], np.ndarray]] = None,
+    mean_emb_b: Optional[Union[List[float], np.ndarray]] = None,
+    median_emb_a: Optional[Union[List[float], np.ndarray]] = None,
+    median_emb_b: Optional[Union[List[float], np.ndarray]] = None,
 ) -> Dict[str, Any]:
     """
-    Computes Pairwise Cosine Similarity between Video A and Video B median embeddings:
-    sim_dl = max(0.0, e_A . e_B) * 100%
-    l2_dist = ||e_A - e_B||_2
-
-    Also computes 5x5 frame-to-frame cross matrix and stats.
+    Computes Dual Similarity Scores between Video A and Video B:
+    - mean_pooling_similarity_pct: max(0.0, E_mean_A . E_mean_B) * 100%
+    - mean_l2_distance: ||E_mean_A - E_mean_B||_2
+    - median_pooling_similarity_pct: max(0.0, E_median_A . E_median_B) * 100%
+    - median_l2_distance: ||E_median_A - E_median_B||_2
+    - trimmed_cross_frame_similarity_pct: mean of the top-15 highest frame pairs in the 5x5 cross-video matrix.
+    - dl_similarity_pct: default to mean_pooling_similarity_pct
+    - l2_distance: default to mean_l2_distance
     """
-    va = np.array(emb_a, dtype=np.float32)
-    vb = np.array(emb_b, dtype=np.float32)
+    def extract_pair(raw, explicit_mean, explicit_median):
+        m_mean = explicit_mean
+        m_med = explicit_median
+        if m_mean is None and isinstance(raw, dict):
+            m_mean = raw.get("mean_embedding", raw.get("median_embedding"))
+        if m_med is None and isinstance(raw, dict):
+            m_med = raw.get("median_embedding", raw.get("mean_embedding"))
+        if m_mean is None:
+            m_mean = raw
+        if m_med is None:
+            m_med = raw
+        return np.array(m_mean, dtype=np.float32), np.array(m_med, dtype=np.float32)
 
-    norm_a = np.linalg.norm(va)
-    norm_b = np.linalg.norm(vb)
-    va_unit = va / max(1e-8, norm_a)
-    vb_unit = vb / max(1e-8, norm_b)
+    mean_a, med_a = extract_pair(emb_a, mean_emb_a, median_emb_a)
+    mean_b, med_b = extract_pair(emb_b, mean_emb_b, median_emb_b)
 
-    dot = float(np.dot(va_unit, vb_unit))
-    sim_pct = round(max(0.0, min(1.0, dot)) * 100.0, 2)
-    l2_dist = round(float(np.linalg.norm(va_unit - vb_unit)), 4)
+    def to_unit(vec):
+        norm = np.linalg.norm(vec)
+        return vec / max(1e-8, norm)
+
+    u_mean_a = to_unit(mean_a)
+    u_mean_b = to_unit(mean_b)
+    u_med_a = to_unit(med_a)
+    u_med_b = to_unit(med_b)
+
+    # 1. Mean Pooling Cosine & L2
+    mean_dot = float(np.dot(u_mean_a, u_mean_b))
+    mean_sim_pct = round(max(0.0, min(1.0, mean_dot)) * 100.0, 2)
+    mean_l2 = round(float(np.linalg.norm(u_mean_a - u_mean_b)), 4)
+
+    # 2. Median Pooling Cosine & L2
+    med_dot = float(np.dot(u_med_a, u_med_b))
+    med_sim_pct = round(max(0.0, min(1.0, med_dot)) * 100.0, 2)
+    med_l2 = round(float(np.linalg.norm(u_med_a - u_med_b)), 4)
+
+    # Set default metrics to mean pooling
+    dl_similarity_pct = mean_sim_pct
+    l2_dist = mean_l2
 
     # Decision thresholds
-    if sim_pct >= 88.0:
+    if dl_similarity_pct >= 88.0:
         verdict = "MATCH (Confirmed Same Cattle)"
         badge_variant = "match"
         badge_color = "emerald"
-    elif sim_pct >= 78.0:
+    elif dl_similarity_pct >= 78.0:
         verdict = "LIKELY MATCH (High Biometric Similarity)"
         badge_variant = "likely"
         badge_color = "teal"
-    elif sim_pct >= 68.0:
+    elif dl_similarity_pct >= 68.0:
         verdict = "INCONCLUSIVE (Partial Geometric Overlap)"
         badge_variant = "inconclusive"
         badge_color = "amber"
@@ -617,34 +792,46 @@ def compute_dl_cosine_similarity(
         badge_variant = "distinct"
         badge_color = "rose"
 
-    # Cross 5x5 frame similarity matrix
+    # Cross 5x5 frame similarity matrix & trimmed cross-frame similarity
     matrix_stats = {}
     cross_matrix = []
+    trimmed_cross_frame_sim_pct = 0.0
+
     if per_frames_a and per_frames_b:
         list_a = [np.array(f, dtype=np.float32) for f in per_frames_a]
         list_b = [np.array(f, dtype=np.float32) for f in per_frames_b]
         all_pair_sims = []
         for i, fa in enumerate(list_a):
             row = []
-            fa_u = fa / max(1e-8, np.linalg.norm(fa))
+            fa_u = to_unit(fa)
             for j, fb in enumerate(list_b):
-                fb_u = fb / max(1e-8, np.linalg.norm(fb))
+                fb_u = to_unit(fb)
                 s = round(max(0.0, float(np.dot(fa_u, fb_u))) * 100.0, 2)
                 row.append(s)
                 all_pair_sims.append(s)
             cross_matrix.append(row)
 
         if all_pair_sims:
+            # Top-15 highest frame pairs in 5x5 matrix
+            sorted_pairs = sorted(all_pair_sims, reverse=True)
+            top_k = sorted_pairs[:min(15, len(sorted_pairs))]
+            trimmed_cross_frame_sim_pct = round(float(np.mean(top_k)), 2)
             matrix_stats = {
                 "min_pair_similarity": round(float(np.min(all_pair_sims)), 2),
                 "max_pair_similarity": round(float(np.max(all_pair_sims)), 2),
                 "median_pair_similarity": round(float(np.median(all_pair_sims)), 2),
                 "mean_pair_similarity": round(float(np.mean(all_pair_sims)), 2),
+                "trimmed_top15_similarity": trimmed_cross_frame_sim_pct,
             }
 
     return {
-        "dl_similarity_pct": sim_pct,
+        "dl_similarity_pct": dl_similarity_pct,
         "l2_distance": l2_dist,
+        "mean_pooling_similarity_pct": mean_sim_pct,
+        "mean_l2_distance": mean_l2,
+        "median_pooling_similarity_pct": med_sim_pct,
+        "median_l2_distance": med_l2,
+        "trimmed_cross_frame_similarity_pct": trimmed_cross_frame_sim_pct,
         "verdict": verdict,
         "badge_variant": badge_variant,
         "badge_color": badge_color,

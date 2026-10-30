@@ -23,7 +23,7 @@ import asyncio
 import functools
 import subprocess
 from pathlib import Path
-from typing import Optional, List, Any, Dict
+from typing import Optional, List, Any, Dict, Union
 
 if not hasattr(asyncio, "to_thread"):
     async def _asyncio_to_thread(func, /, *args, **kwargs):
@@ -1105,8 +1105,12 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
 class CosineSimilarityRequest(BaseModel):
     vector_a: List[float]
     vector_b: List[float]
-    dl_emb_a: Optional[List[float]] = None
-    dl_emb_b: Optional[List[float]] = None
+    dl_emb_a: Optional[Union[List[float], Dict[str, Any]]] = None
+    dl_emb_b: Optional[Union[List[float], Dict[str, Any]]] = None
+    dl_mean_a: Optional[List[float]] = None
+    dl_mean_b: Optional[List[float]] = None
+    dl_median_a: Optional[List[float]] = None
+    dl_median_b: Optional[List[float]] = None
     per_frames_a: Optional[List[List[float]]] = None
     per_frames_b: Optional[List[List[float]]] = None
 
@@ -1116,7 +1120,9 @@ class CosineSimilarityRequest(BaseModel):
 async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
     """
     Computes Normalized Cosine Similarity on classical 10-D graph minutiae parameters
-    and Deep Learning Biometric Embeddings (ConvNeXt-Tiny / ResNet-50 ArcFace/GeM).
+    (with Bray-Curtis magnitude penalty calibration) and Deep Learning Biometric
+    Embeddings (ConvNeXt-Tiny / ResNet-50 Spatial GeM & ArcFace).
+    Supports dual embeddings (mean and median pooling) with full backward compatibility.
     """
     try:
         res = compute_cosine_similarity(
@@ -1126,6 +1132,10 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
             dl_emb_b=req.dl_emb_b,
             per_frames_a=req.per_frames_a,
             per_frames_b=req.per_frames_b,
+            dl_mean_a=req.dl_mean_a,
+            dl_mean_b=req.dl_mean_b,
+            dl_median_a=req.dl_median_a,
+            dl_median_b=req.dl_median_b,
         )
         return res
     except Exception as exc:

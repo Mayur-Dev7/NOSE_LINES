@@ -116,26 +116,32 @@ def normalize_feature_vector(vec: List[float]) -> np.ndarray:
 def compute_cosine_similarity(
     vec_a: List[float],
     vec_b: List[float],
-    dl_emb_a: Optional[List[float]] = None,
-    dl_emb_b: Optional[List[float]] = None,
+    dl_emb_a: Optional[Union[List[float], Dict[str, Any]]] = None,
+    dl_emb_b: Optional[Union[List[float], Dict[str, Any]]] = None,
     per_frames_a: Optional[List[List[float]]] = None,
     per_frames_b: Optional[List[List[float]]] = None,
+    dl_mean_a: Optional[List[float]] = None,
+    dl_mean_b: Optional[List[float]] = None,
+    dl_median_a: Optional[List[float]] = None,
+    dl_median_b: Optional[List[float]] = None,
 ) -> Dict[str, Any]:
     """
-    Computes Cosine Similarity between two 10-D feature vectors:
-    Cosine Similarity = (A . B) / (||A|| * ||B||) * 100%
+    Computes Calibrated Cosine Similarity on 10-D graph minutiae parameters
+    with Bray-Curtis / L1 Magnitude Penalty:
+        MagnitudePenalty = 1.0 - (sum(|v_A - v_B|) / (sum(v_A + v_B) + 1e-8))
+        CalibratedGraphSimilarity = CosineSim * MagnitudePenalty
 
-    If deep learning embeddings (dl_emb_a, dl_emb_b) are provided, also calculates
-    the DL ArcFace/GeM Cosine Similarity, L2 distance, and 5x5 cross-frame matrix.
+    Also calculates dual Deep Learning Biometric Cosine Similarities (Mean Pooling &
+    Median Pooling), Euclidean L2 Distances, Trimmed Cross-Frame similarity, and cross-matrix stats.
     """
     v1 = np.array(vec_a, dtype=float)
     v2 = np.array(vec_b, dtype=float)
 
-    # Raw cosine similarity
+    # Raw unnormalized cosine similarity
     dot_raw = float(np.dot(v1, v2))
     norm_a_raw = float(np.linalg.norm(v1))
     norm_b_raw = float(np.linalg.norm(v2))
-    raw_sim = (dot_raw / max(1e-6, norm_a_raw * norm_b_raw)) * 100.0 if (norm_a_raw > 0 and norm_b_raw > 0) else 0.0
+    raw_dot_sim = (dot_raw / max(1e-6, norm_a_raw * norm_b_raw)) * 100.0 if (norm_a_raw > 0 and norm_b_raw > 0) else 0.0
 
     # Normalized cosine similarity (dimensions scaled to equal weight)
     n1 = normalize_feature_vector(vec_a)
@@ -144,16 +150,23 @@ def compute_cosine_similarity(
     norm1 = float(np.linalg.norm(n1))
     norm2 = float(np.linalg.norm(n2))
     norm_sim = (dot_norm / max(1e-6, norm1 * norm2)) * 100.0 if (norm1 > 0 and norm2 > 0) else 0.0
+    norm_sim = max(0.0, min(100.0, norm_sim))
 
-    # Match classification
-    is_match = norm_sim >= 85.0
-    if norm_sim >= 92.0:
+    # Classical 10-D Graph Similarity Bray-Curtis / L1 Magnitude Penalty
+    l1_diff = float(np.sum(np.abs(n1 - n2)))
+    l1_sum = float(np.sum(n1 + n2)) + 1e-8
+    mag_penalty = max(0.0, min(1.0, 1.0 - (l1_diff / l1_sum)))
+    calibrated_graph_sim = norm_sim * mag_penalty
+
+    # Match classification based on calibrated graph similarity
+    is_match = calibrated_graph_sim >= 85.0
+    if calibrated_graph_sim >= 92.0:
         verdict = "MATCH (Confirmed Same Cattle)"
         verdict_color = "emerald"
-    elif norm_sim >= 85.0:
+    elif calibrated_graph_sim >= 85.0:
         verdict = "LIKELY MATCH (High Similarity)"
         verdict_color = "teal"
-    elif norm_sim >= 75.0:
+    elif calibrated_graph_sim >= 75.0:
         verdict = "INCONCLUSIVE (Partial Overlap)"
         verdict_color = "amber"
     else:
@@ -161,8 +174,11 @@ def compute_cosine_similarity(
         verdict_color = "rose"
 
     result: Dict[str, Any] = {
-        "cosine_similarity": round(norm_sim, 2),
-        "raw_cosine_similarity": round(raw_sim, 2),
+        "cosine_similarity": round(calibrated_graph_sim, 2),
+        "raw_cosine_similarity": round(norm_sim, 2),
+        "magnitude_penalty_factor": round(mag_penalty, 4),
+        "magnitude_penalty_pct": round(mag_penalty * 100.0, 2),
+        "unnormalized_cosine_similarity": round(raw_dot_sim, 2),
         "is_match": is_match,
         "verdict": verdict,
         "verdict_color": verdict_color,
@@ -171,12 +187,31 @@ def compute_cosine_similarity(
     }
 
     # Deep learning embedding matching if provided
-    if dl_emb_a is not None and dl_emb_b is not None:
+    has_dl = (
+        (dl_emb_a is not None and dl_emb_b is not None)
+        or (dl_mean_a is not None and dl_mean_b is not None)
+        or (dl_median_a is not None and dl_median_b is not None)
+    )
+    if has_dl:
         try:
             from dl_muzzle_embedder import compute_dl_cosine_similarity as calc_dl_sim
-            dl_res = calc_dl_sim(dl_emb_a, dl_emb_b, per_frames_a, per_frames_b)
+            dl_res = calc_dl_sim(
+                emb_a=dl_emb_a if dl_emb_a is not None else (dl_mean_a or dl_median_a),
+                emb_b=dl_emb_b if dl_emb_b is not None else (dl_mean_b or dl_median_b),
+                per_frames_a=per_frames_a,
+                per_frames_b=per_frames_b,
+                mean_emb_a=dl_mean_a,
+                mean_emb_b=dl_mean_b,
+                median_emb_a=dl_median_a,
+                median_emb_b=dl_median_b,
+            )
             result["dl_similarity_pct"] = dl_res["dl_similarity_pct"]
+            result["mean_pooling_similarity_pct"] = dl_res["mean_pooling_similarity_pct"]
+            result["median_pooling_similarity_pct"] = dl_res["median_pooling_similarity_pct"]
+            result["trimmed_cross_frame_similarity_pct"] = dl_res["trimmed_cross_frame_similarity_pct"]
             result["l2_distance"] = dl_res["l2_distance"]
+            result["mean_l2_distance"] = dl_res["mean_l2_distance"]
+            result["median_l2_distance"] = dl_res["median_l2_distance"]
             result["dl_verdict"] = dl_res["verdict"]
             result["dl_badge_variant"] = dl_res["badge_variant"]
             result["dl_badge_color"] = dl_res["badge_color"]
@@ -645,6 +680,8 @@ def extract_five_muzzle_stages(
     dl_model = None
     dl_frame_embeddings: List[np.ndarray] = []
     dl_latencies: List[float] = []
+    dl_confidences: List[float] = []
+    dl_blur_variances: List[float] = []
     if enable_dl_embedding:
         try:
             from dl_muzzle_embedder import get_muzzle_embedder, extract_frame_embedding, aggregate_temporal_embeddings
@@ -795,6 +832,8 @@ def extract_five_muzzle_stages(
                 )
                 dl_frame_embeddings.append(dl_frame_emb)
                 dl_latencies.append(dl_lat_ms)
+                dl_confidences.append(float(conf))
+                dl_blur_variances.append(float(lap_var))
             except Exception as e:
                 log(f"Warning: DL embedding extraction failed on frame {i + 1}: {e}")
 
@@ -846,16 +885,25 @@ def extract_five_muzzle_stages(
     if dl_frame_embeddings:
         try:
             from dl_muzzle_embedder import aggregate_temporal_embeddings
-            median_dl_emb, intra_consistency = aggregate_temporal_embeddings(dl_frame_embeddings)
+            agg_res = aggregate_temporal_embeddings(
+                dl_frame_embeddings,
+                confidences=dl_confidences,
+                blur_variances=dl_blur_variances,
+            )
             dl_summary = {
                 "backbone": dl_backbone,
                 "input_mode": dl_input_mode,
                 "weights_mode": dl_model.weights_mode if dl_model else "pretrained_gem_zeroshot",
-                "embedding_dim": int(len(median_dl_emb)),
+                "embedding_dim": int(len(agg_res["mean_embedding"])),
                 "per_frame_embeddings": [np.round(e, 5).tolist() for e in dl_frame_embeddings],
-                "median_embedding": np.round(median_dl_emb, 5).tolist(),
+                "mean_embedding": np.round(agg_res["mean_embedding"], 5).tolist(),
+                "median_embedding": np.round(agg_res["median_embedding"], 5).tolist(),
+                "kept_frames_count": int(agg_res["kept_frames_count"]),
+                "dropped_frame_indices": list(agg_res["dropped_frame_indices"]),
+                "intra_video_consistency_pct": round(float(agg_res["intra_video_consistency_pct"]), 2),
+                "agreement_scores": agg_res.get("agreement_scores", []),
+                "weights": agg_res.get("weights", []),
                 "avg_inference_ms": round(float(np.mean(dl_latencies)), 2) if dl_latencies else 0.0,
-                "intra_video_consistency_pct": round(float(intra_consistency), 2),
             }
         except Exception as e:
             logger.warning(f"DL temporal aggregation error: {e}")
