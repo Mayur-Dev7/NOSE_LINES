@@ -21,6 +21,9 @@ from server import (
     compute_cosine_similarity_endpoint,
     ExtractVideoFiveFramesRequest,
     _spatial_cache_key,
+    get_embedding_gallery_presets_endpoint,
+    match_one_to_n_endpoint,
+    OneToNMatchRequest,
 )
 
 async def test_cosine_similarity():
@@ -76,8 +79,33 @@ def test_extraction_request_model():
     print(f"[PASS] ExtractVideoFiveFramesRequest model validated: backbone={req.dl_backbone}, mode={req.dl_input_mode}")
 
 
+async def test_gallery_and_1_to_n_search():
+    presets = await get_embedding_gallery_presets_endpoint()
+    assert "gallery" in presets
+    assert len(presets["gallery"]) >= 5
+    assert "sample_cow_a" in presets
+    print(f"[PASS] Gallery Presets Endpoint returned {len(presets['gallery'])} registered cattle")
+
+    # Match Sample Cow A against Gallery
+    q_emb = presets["sample_cow_a"]["embedding"]
+    req = OneToNMatchRequest(query_embedding=q_emb, threshold=88.0)
+    res = await match_one_to_n_endpoint(req)
+
+    assert res["success"] is True
+    assert res["verdict_is_match"] is True
+    assert "Cattle A (Profile 2" in res["top_match"]["name"]
+    assert res["top_match"]["similarity_pct"] >= 88.0
+    assert res["margin_ahead_pct"] > 40.0
+    print(f"[PASS] 1-to-N Match Endpoint:")
+    print(f"       Verdict: {res['verdict']}")
+    print(f"       Top Match: {res['top_match']['name']} ({res['top_match']['similarity_pct']}%)")
+    print(f"       Euclidean L2: {res['top_match']['l2_distance']}")
+    print(f"       Lead Margin Ahead: +{res['margin_ahead_pct']}%")
+
+
 if __name__ == "__main__":
     print("=== RUNNING FASTAPI ENDPOINT INTEGRATION TESTS ===")
     test_extraction_request_model()
     asyncio.run(test_cosine_similarity())
+    asyncio.run(test_gallery_and_1_to_n_search())
     print("\n=== ALL INTEGRATION TESTS PASSED WITH 100% SUCCESS! ===")

@@ -3,7 +3,9 @@ import GrooveStudioTab from './GrooveStudioTab';
 import GrooveTuningSection from './GrooveTuningSection';
 import MultiImageTemplateBuilder from './MultiImageTemplateBuilder';
 import TwoVideoCosineMatcher from './TwoVideoCosineMatcher';
+import SingleVideoEmbeddingMatcher from './SingleVideoEmbeddingMatcher';
 import {
+  Search,
   Cpu,
   Zap,
   Play,
@@ -585,6 +587,24 @@ export default function App() {
               </span>
             </button>
 
+            {/* Tab: 1-to-N Cattle Search & Embedder */}
+            <button
+              onClick={() => setActiveTab('one_to_n')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'one_to_n'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+              }`}
+            >
+              <Search className="w-3.5 h-3.5 text-indigo-400" />
+              <span>1-to-N Cattle Search & Embedder</span>
+              <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
+                activeTab === 'one_to_n' ? 'bg-indigo-500/25 text-indigo-300' : 'bg-white/[0.05] text-indigo-400'
+              }`}>
+                New
+              </span>
+            </button>
+
             {/* Groove Extraction Studio (nose_lines) */}
             <button
               onClick={() => setActiveTab('groove_studio')}
@@ -662,6 +682,13 @@ export default function App() {
         {/* ========================================================= */}
         {activeTab === 'two_video_cosine' && (
           <TwoVideoCosineMatcher sampleVideos={status?.sample_videos || []} />
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB: 1-TO-N CATTLE BIOMETRIC SEARCH & EMBEDDER            */}
+        {/* ========================================================= */}
+        {activeTab === 'one_to_n' && (
+          <SingleVideoEmbeddingMatcher sampleVideos={status?.sample_videos || []} />
         )}
 
         {/* ========================================================= */}

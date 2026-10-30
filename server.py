@@ -24,6 +24,9 @@ import functools
 import subprocess
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
+import logging
+
+logger = logging.getLogger("server")
 
 if not hasattr(asyncio, "to_thread"):
     async def _asyncio_to_thread(func, /, *args, **kwargs):
@@ -415,12 +418,22 @@ def resolve_video_path(v_path: str) -> Path:
     p = Path(v_path)
     if p.exists():
         return p.resolve()
+    cand_base = BASE_DIR / v_path
+    if cand_base.exists():
+        return cand_base.resolve()
     cand_root = Path("/home/adis_mayur/F_CODES") / v_path
     if cand_root.exists():
         return cand_root.resolve()
     cand_upload = UPLOADS_DIR / v_path
     if cand_upload.exists():
         return cand_upload.resolve()
+    if not p.is_absolute():
+        matches = sorted(UPLOADS_DIR.glob(f"*_{p.name}"))
+        if matches:
+            return matches[-1].resolve()
+        matches_stem = sorted(UPLOADS_DIR.glob(f"*{p.stem}*.mp4"))
+        if matches_stem:
+            return matches_stem[-1].resolve()
     return p
 
 
@@ -1140,6 +1153,129 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
         return res
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cosine similarity calculation failed: {exc}")
+
+
+class GalleryCandidateModel(BaseModel):
+    id: str
+    name: str
+    tag: Optional[str] = None
+    breed: Optional[str] = None
+    registered_date: Optional[str] = None
+    embedding: List[float]
+
+
+class OneToNMatchRequest(BaseModel):
+    query_embedding: List[float]
+    gallery: Optional[List[GalleryCandidateModel]] = None
+    threshold: Optional[float] = 88.0
+
+
+@app.get("/api/embedding/gallery-presets")
+async def get_embedding_gallery_presets_endpoint():
+    """Returns preset registered cattle gallery candidates and sample query vectors."""
+    presets_path = BASE_DIR / "config" / "gallery_presets.json"
+    if presets_path.exists():
+        try:
+            return json.loads(presets_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(f"Failed to read presets JSON: {exc}")
+    return {
+        "gallery": [],
+        "sample_cow_a": {"name": "Sample Cow A", "embedding": []},
+        "sample_cow_b": {"name": "Sample Cow B", "embedding": []},
+    }
+
+
+@app.post("/api/embedding/1-to-n-match")
+async def match_one_to_n_endpoint(req: OneToNMatchRequest):
+    """
+    Ranks 1 query 512-D embedding against N gallery cattle candidates.
+    Returns sorted leaderboard with similarity %, Euclidean L2 distance,
+    top winner badge, margin ahead of #2 runner-up, and verdict classification.
+    """
+    if not req.query_embedding:
+        raise HTTPException(status_code=400, detail="query_embedding cannot be empty.")
+
+    q_vec = np.array(req.query_embedding, dtype=float)
+    q_norm = np.linalg.norm(q_vec)
+    if q_norm > 0:
+        q_vec = q_vec / q_norm
+
+    gallery_candidates = req.gallery
+    if not gallery_candidates:
+        presets_path = BASE_DIR / "config" / "gallery_presets.json"
+        if presets_path.exists():
+            data = json.loads(presets_path.read_text(encoding="utf-8"))
+            gallery_candidates = [
+                GalleryCandidateModel(**cand) for cand in data.get("gallery", [])
+            ]
+        else:
+            gallery_candidates = []
+
+    leaderboard = []
+    threshold = float(req.threshold if req.threshold is not None else 88.0)
+
+    for cand in gallery_candidates:
+        c_vec = np.array(cand.embedding, dtype=float)
+        c_norm = np.linalg.norm(c_vec)
+        if c_norm > 0:
+            c_vec = c_vec / c_norm
+
+        sim_val = float(np.dot(q_vec, c_vec))
+        sim_pct = max(0.0, min(100.0, sim_val * 100.0))
+        l2_dist = float(np.linalg.norm(q_vec - c_vec))
+
+        if sim_pct >= 88.0:
+            verdict = "MATCH"
+            verdict_color = "emerald"
+        elif sim_pct >= 78.0:
+            verdict = "LIKELY MATCH"
+            verdict_color = "teal"
+        elif sim_pct >= 65.0:
+            verdict = "INCONCLUSIVE"
+            verdict_color = "amber"
+        else:
+            verdict = "DISTINCT"
+            verdict_color = "rose"
+
+        leaderboard.append({
+            "id": cand.id,
+            "name": cand.name,
+            "tag": cand.tag or "N/A",
+            "breed": cand.breed or "Unknown",
+            "registered_date": cand.registered_date or "",
+            "similarity_pct": round(sim_pct, 2),
+            "l2_distance": round(l2_dist, 4),
+            "is_match": sim_pct >= threshold,
+            "verdict": verdict,
+            "verdict_color": verdict_color,
+        })
+
+    leaderboard.sort(key=lambda x: x["similarity_pct"], reverse=True)
+    for i, item in enumerate(leaderboard):
+        item["rank"] = i + 1
+
+    top_match = leaderboard[0] if leaderboard else None
+    second_match = leaderboard[1] if len(leaderboard) > 1 else None
+    margin = round(top_match["similarity_pct"] - (second_match["similarity_pct"] if second_match else 0.0), 2) if top_match else 0.0
+
+    is_top_match = bool(top_match and top_match["similarity_pct"] >= threshold)
+    verdict_text = f"MATCH FOUND: {top_match['name']}" if is_top_match else "NO MATCH (All Distinct Animals)"
+
+    return {
+        "success": True,
+        "top_match": {
+            **top_match,
+            "margin_ahead_pct": margin,
+        } if top_match else None,
+        "verdict": verdict_text,
+        "verdict_is_match": is_top_match,
+        "verdict_color": "emerald" if is_top_match else "rose",
+        "margin_ahead_pct": margin,
+        "threshold": threshold,
+        "leaderboard": leaderboard,
+        "total_gallery_candidates": len(leaderboard),
+    }
 
 
 @app.get("/api/video/match-config")
