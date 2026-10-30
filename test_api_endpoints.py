@@ -86,21 +86,33 @@ async def test_gallery_and_1_to_n_search():
     assert "sample_cow_a" in presets
     print(f"[PASS] Gallery Presets Endpoint returned {len(presets['gallery'])} registered cattle")
 
-    # Match Sample Cow A against Gallery
+    # Match Sample Cow A against Full Gallery
     q_emb = presets["sample_cow_a"]["embedding"]
     req = OneToNMatchRequest(query_embedding=q_emb, threshold=88.0)
     res = await match_one_to_n_endpoint(req)
 
     assert res["success"] is True
     assert res["verdict_is_match"] is True
-    assert "Cattle A (Profile 2" in res["top_match"]["name"]
+    assert "Cattle A" in res["top_match"]["name"]
     assert res["top_match"]["similarity_pct"] >= 88.0
-    assert res["margin_ahead_pct"] > 40.0
-    print(f"[PASS] 1-to-N Match Endpoint:")
+    print(f"[PASS] 1-to-N Match Endpoint (Full Gallery):")
     print(f"       Verdict: {res['verdict']}")
     print(f"       Top Match: {res['top_match']['name']} ({res['top_match']['similarity_pct']}%)")
     print(f"       Euclidean L2: {res['top_match']['l2_distance']}")
     print(f"       Lead Margin Ahead: +{res['margin_ahead_pct']}%")
+
+    # Test cross-video re-identification (querying Cattle A Profile 1 against gallery of alternative takes)
+    gallery_cross = [c for c in presets["gallery"] if "Profile 1" not in c["name"]]
+    req_cross = OneToNMatchRequest(query_embedding=q_emb, gallery=gallery_cross, threshold=88.0)
+    res_cross = await match_one_to_n_endpoint(req_cross)
+    assert res_cross["success"] is True
+    assert res_cross["verdict_is_match"] is True
+    assert "Cattle A (Profile 2" in res_cross["top_match"]["name"]
+    assert res_cross["top_match"]["similarity_pct"] >= 88.0
+    assert res_cross["margin_ahead_pct"] > 40.0
+    print(f"[PASS] 1-to-N Cross-Video Re-identification:")
+    print(f"       Top Match: {res_cross['top_match']['name']} ({res_cross['top_match']['similarity_pct']}%)")
+    print(f"       Lead Margin Ahead of Cattle B/C/D/E: +{res_cross['margin_ahead_pct']}%")
 
 
 if __name__ == "__main__":

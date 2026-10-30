@@ -1155,127 +1155,509 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
         raise HTTPException(status_code=500, detail=f"Cosine similarity calculation failed: {exc}")
 
 
-class GalleryCandidateModel(BaseModel):
-    id: str
-    name: str
-    tag: Optional[str] = None
-    breed: Optional[str] = None
-    registered_date: Optional[str] = None
-    embedding: List[float]
+def _extract_embedding_from_summary(summary_data: Dict[str, Any], pool_method: str = "median") -> Optional[List[float]]:
+    """Helper to extract an L2-normalized 512-D embedding list from summary data."""
+    if not isinstance(summary_data, dict):
+        return None
+    dl = summary_data.get("dl_embedding")
+    if not dl or not isinstance(dl, dict):
+        return None
+
+    emb = None
+    if pool_method == "mean":
+        emb = dl.get("mean_embedding") or dl.get("median_embedding")
+    else:
+        emb = dl.get("median_embedding") or dl.get("mean_embedding")
+
+    if not emb and "per_frame_embeddings" in dl and dl["per_frame_embeddings"]:
+        frames = dl["per_frame_embeddings"]
+        if pool_method == "mean":
+            emb = np.mean(frames, axis=0).tolist()
+        else:
+            emb = np.median(frames, axis=0).tolist()
+
+    if emb:
+        arr = np.array(emb, dtype=np.float32)
+        norm = float(np.linalg.norm(arr))
+        if norm > 1e-8:
+            arr = arr / norm
+        return [round(float(x), 5) for x in arr]
+    return None
+
+
+GALLERY_PRESET_DEFINITIONS = [
+    {
+        "id": "cattle_001_a",
+        "name": "Cattle A (Profile 1)",
+        "folders": ["muzzleVideo_frangi_adaptive", "1793364335_muzzleVideo_frangi_adaptive", "muzzleVideo"],
+        "video_path": "uploads/1793364335_muzzleVideo.mp4",
+        "notes": "Registered Baseline",
+        "tag": "US-94210-A",
+        "breed": "Holstein Friesian",
+        "registered_date": "2024-09-10",
+        "meta": {"source_video": "muzzleVideo.mp4", "breed": "Holstein Friesian", "registration_id": "RF-9021", "animal_id": "cattle_001"},
+    },
+    {
+        "id": "cattle_001_b",
+        "name": "Cattle A (Profile 2 - Same Animal)",
+        "folders": ["muzzleVideo2_frangi_adaptive", "1793364192_muzzleVideo2_frangi_adaptive", "muzzleVideo2"],
+        "video_path": "uploads/1793364192_muzzleVideo2.mp4",
+        "notes": "Alternative Take",
+        "tag": "US-94210-B",
+        "breed": "Holstein Friesian",
+        "registered_date": "2024-09-12",
+        "meta": {"source_video": "muzzleVideo2.mp4", "breed": "Holstein Friesian", "registration_id": "RF-9021", "animal_id": "cattle_001"},
+    },
+    {
+        "id": "cattle_002",
+        "name": "Cattle B (Different Animal)",
+        "folders": ["muzzleVideo3_frangi_adaptive", "1793364199_muzzleVideo3_frangi_adaptive", "muzzleVideo3"],
+        "video_path": "uploads/1793364199_muzzleVideo3.mp4",
+        "notes": "Unrelated Dairy Cow",
+        "tag": "US-88412-C",
+        "breed": "Jersey",
+        "registered_date": "2024-09-15",
+        "meta": {"source_video": "muzzleVideo3.mp4", "breed": "Jersey", "registration_id": "RF-4412", "animal_id": "cattle_002"},
+    },
+    {
+        "id": "cattle_003",
+        "name": "Cattle C (Heifer)",
+        "folders": ["1793369778_muzzleVideo4_frangi_adaptive", "muzzleVideo4_frangi_adaptive"],
+        "video_path": "uploads/1793369778_muzzleVideo4.mp4",
+        "notes": "Registered Heifer",
+        "tag": "US-77201-D",
+        "breed": "Angus",
+        "registered_date": "2024-09-20",
+        "meta": {"source_video": "muzzleVideo4.mp4", "breed": "Angus", "registration_id": "RF-7720", "animal_id": "cattle_003"},
+    },
+    {
+        "id": "cattle_004",
+        "name": "Cattle D (Calf)",
+        "folders": ["1793369565_muzzleVideo5_frangi_adaptive", "1793369773_muzzleVideo5_frangi_adaptive", "muzzleVideo5_frangi_adaptive"],
+        "video_path": "uploads/1793369565_muzzleVideo5.mp4",
+        "notes": "Pasture Herd #4",
+        "tag": "US-31085-E",
+        "breed": "Guernsey",
+        "registered_date": "2024-10-01",
+        "meta": {"source_video": "muzzleVideo5.mp4", "breed": "Guernsey", "registration_id": "RF-3108", "animal_id": "cattle_004"},
+    },
+    {
+        "id": "cattle_005",
+        "name": "Cattle E (Crossbreed)",
+        "folders": ["1793364507_muzzleVideo7_frangi_adaptive", "muzzleVideo7_frangi_adaptive"],
+        "video_path": "uploads/1793364507_muzzleVideo7.mp4",
+        "notes": "Breeding Stock",
+        "tag": "US-88540-F",
+        "breed": "Simmental Cross",
+        "registered_date": "2024-10-05",
+        "meta": {"source_video": "muzzleVideo7.mp4", "breed": "Simmental Cross", "registration_id": "RF-8854", "animal_id": "cattle_005"},
+    },
+]
+
+_CACHED_GALLERY_PRESETS: Optional[List[Dict[str, Any]]] = None
+
+def load_gallery_presets_data(force_reload: bool = False) -> List[Dict[str, Any]]:
+    global _CACHED_GALLERY_PRESETS
+    if _CACHED_GALLERY_PRESETS is not None and not force_reload:
+        return _CACHED_GALLERY_PRESETS
+
+    presets_json_path = BASE_DIR / "config" / "gallery_presets.json"
+    if presets_json_path.exists():
+        try:
+            preset_content = json.loads(presets_json_path.read_text(encoding="utf-8"))
+            gallery = preset_content.get("gallery", [])
+            if gallery and len(gallery) > 0:
+                _CACHED_GALLERY_PRESETS = gallery
+                return gallery
+        except Exception as exc:
+            logger.warning(f"Failed loading presets JSON from {presets_json_path}: {exc}")
+
+    vff_dir = OUTPUT_DIR / "video_five_frames"
+    gallery = []
+
+    for pdef in GALLERY_PRESET_DEFINITIONS:
+        cid = pdef["id"]
+        name = pdef["name"]
+        notes = pdef.get("notes")
+        meta = dict(pdef.get("meta") or {})
+        emb = None
+
+        # 1. Search preset folders
+        for folder_name in pdef.get("folders", []):
+            summary_path = vff_dir / folder_name / "summary.json"
+            if summary_path.exists():
+                try:
+                    data = json.loads(summary_path.read_text(encoding="utf-8"))
+                    emb = _extract_embedding_from_summary(data)
+                    if emb:
+                        meta["source_summary"] = str(summary_path.relative_to(BASE_DIR))
+                        break
+                except Exception as exc:
+                    logger.debug(f"Could not load {summary_path}: {exc}")
+
+        # 2. Search any summary in vff_dir matching the stem
+        if emb is None:
+            stem = pdef.get("video_path", "").split("/")[-1].replace(".mp4", "")
+            if stem:
+                for cand_summary in sorted(vff_dir.glob(f"*{stem}*/summary.json")):
+                    try:
+                        data = json.loads(cand_summary.read_text(encoding="utf-8"))
+                        emb = _extract_embedding_from_summary(data)
+                        if emb:
+                            meta["source_summary"] = str(cand_summary.relative_to(BASE_DIR))
+                            break
+                    except Exception:
+                        pass
+
+        if emb:
+            gallery.append({
+                "id": cid,
+                "name": name,
+                "embedding": emb,
+                "notes": notes,
+                "tag": pdef.get("tag"),
+                "breed": pdef.get("breed"),
+                "registered_date": pdef.get("registered_date"),
+                "meta": meta,
+            })
+
+    _CACHED_GALLERY_PRESETS = gallery
+    return gallery
+
+
+@app.get("/api/embedding/gallery-presets")
+async def get_embedding_gallery_presets_endpoint(reload: bool = Query(False)):
+    """
+    Returns a pre-packaged gallery of registered cattle embeddings from
+    existing summary files in output/video_five_frames/ (e.g. muzzleVideo_frangi_adaptive
+    as Cattle A Profile 1, muzzleVideo2_frangi_adaptive as Cattle A Profile 2,
+    muzzleVideo3_frangi_adaptive as Cattle B) or compute them on demand.
+    """
+    gallery = load_gallery_presets_data(force_reload=reload)
+
+    # Check if samples defined in config/gallery_presets.json
+    presets_json_path = BASE_DIR / "config" / "gallery_presets.json"
+    sample_a = None
+    sample_b = None
+    if presets_json_path.exists():
+        try:
+            raw_data = json.loads(presets_json_path.read_text(encoding="utf-8"))
+            sample_a = raw_data.get("sample_cow_a")
+            sample_b = raw_data.get("sample_cow_b")
+        except Exception:
+            pass
+
+    if not sample_a and gallery:
+        for cand in gallery:
+            if "cattle_001_a" in cand["id"] or "profile 1" in cand["name"].lower():
+                sample_a = {"id": cand["id"], "name": cand["name"], "embedding": cand["embedding"]}
+                break
+        if not sample_a:
+            sample_a = {"id": gallery[0]["id"], "name": gallery[0]["name"], "embedding": gallery[0]["embedding"]}
+
+    if not sample_b and len(gallery) > 1:
+        for cand in gallery:
+            if "cattle_002" in cand["id"] or "cattle b" in cand["name"].lower():
+                sample_b = {"id": cand["id"], "name": cand["name"], "embedding": cand["embedding"]}
+                break
+        if not sample_b:
+            sample_b = {"id": gallery[1]["id"], "name": gallery[1]["name"], "embedding": gallery[1]["embedding"]}
+
+    return {
+        "success": True,
+        "gallery": gallery,
+        "sample_cow_a": sample_a,
+        "sample_cow_b": sample_b,
+    }
 
 
 class OneToNMatchRequest(BaseModel):
     query_embedding: List[float]
-    gallery: Optional[List[GalleryCandidateModel]] = None
+    gallery: Optional[List[Dict[str, Any]]] = None
+    similarity_metric: Optional[str] = "cosine"  # "cosine" or "l2"
     threshold: Optional[float] = 88.0
 
 
-@app.get("/api/embedding/gallery-presets")
-async def get_embedding_gallery_presets_endpoint():
-    """Returns preset registered cattle gallery candidates and sample query vectors."""
-    presets_path = BASE_DIR / "config" / "gallery_presets.json"
-    if presets_path.exists():
-        try:
-            return json.loads(presets_path.read_text(encoding="utf-8"))
-        except Exception as exc:
-            logger.warning(f"Failed to read presets JSON: {exc}")
-    return {
-        "gallery": [],
-        "sample_cow_a": {"name": "Sample Cow A", "embedding": []},
-        "sample_cow_b": {"name": "Sample Cow B", "embedding": []},
-    }
-
-
 @app.post("/api/embedding/1-to-n-match")
-async def match_one_to_n_endpoint(req: OneToNMatchRequest):
+async def one_to_n_match_endpoint(req: OneToNMatchRequest):
     """
-    Ranks 1 query 512-D embedding against N gallery cattle candidates.
-    Returns sorted leaderboard with similarity %, Euclidean L2 distance,
-    top winner badge, margin ahead of #2 runner-up, and verdict classification.
+    1-to-N Multi-Cattle Biometric Matching Endpoint:
+    Matches a query 512-D embedding against a gallery matrix G (N, 512).
+    Vectorized NumPy dot-product computation, Euclidean L2 distance,
+    biometric thresholding verdicts, runner-up margin, and candidate ranking.
     """
-    if not req.query_embedding:
+    if not req.query_embedding or len(req.query_embedding) == 0:
         raise HTTPException(status_code=400, detail="query_embedding cannot be empty.")
 
-    q_vec = np.array(req.query_embedding, dtype=float)
-    q_norm = np.linalg.norm(q_vec)
-    if q_norm > 0:
-        q_vec = q_vec / q_norm
+    # 1. Normalize query vector to unit length: q = q / max(1e-8, ||q||_2)
+    q = np.array(req.query_embedding, dtype=np.float32)
+    dim = int(len(q))
+    q_norm = float(np.linalg.norm(q))
+    q = q / max(1e-8, q_norm)
 
     gallery_candidates = req.gallery
-    if not gallery_candidates:
-        presets_path = BASE_DIR / "config" / "gallery_presets.json"
-        if presets_path.exists():
-            data = json.loads(presets_path.read_text(encoding="utf-8"))
-            gallery_candidates = [
-                GalleryCandidateModel(**cand) for cand in data.get("gallery", [])
-            ]
-        else:
-            gallery_candidates = []
+    if gallery_candidates is None:
+        gallery_candidates = load_gallery_presets_data()
 
-    leaderboard = []
+    N = len(gallery_candidates)
+    if N == 0:
+        return {
+            "success": True,
+            "query_dim": dim,
+            "total_candidates": 0,
+            "top_match": None,
+            "margin_to_runner_up": None,
+            "ranked_results": [],
+            "margin_ahead_pct": 0.0,
+            "leaderboard": [],
+            "total_gallery_candidates": 0,
+            "verdict": "NO MATCH (Empty Gallery)",
+            "verdict_is_match": False,
+            "verdict_color": "rose",
+        }
+
+    # 2. Extract and validate candidate embeddings
+    candidate_embeddings = []
+    for idx, item in enumerate(gallery_candidates):
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail=f"Gallery candidate at index {idx} must be a dictionary.")
+        raw_emb = item.get("embedding")
+        if raw_emb is None:
+            raise HTTPException(status_code=400, detail=f"Candidate at index {idx} missing 'embedding' field.")
+        if isinstance(raw_emb, dict):
+            raw_emb = raw_emb.get("median_embedding") or raw_emb.get("mean_embedding")
+            if not raw_emb:
+                raise HTTPException(status_code=400, detail=f"Candidate at index {idx} embedding object has no median/mean vector.")
+        if len(raw_emb) != dim:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Dimension mismatch at candidate {idx} ('{item.get('id', idx)}'): query has {dim} dimensions, candidate has {len(raw_emb)}.",
+            )
+        candidate_embeddings.append(raw_emb)
+
+    # 3. Stack gallery embeddings into matrix G (N, 512), normalize each row to unit length
+    G = np.array(candidate_embeddings, dtype=np.float32)
+    row_norms = np.linalg.norm(G, axis=1, keepdims=True)
+    row_norms = np.maximum(row_norms, 1e-8)
+    G = G / row_norms
+
+    # 4. Compute dot products in one vectorized NumPy call
+    sims = np.dot(G, q)  # (N,)
+    sim_pcts = np.clip(sims, 0.0, 1.0) * 100.0
+    l2_dists = np.linalg.norm(G - q, axis=1)  # (N,)
+
+    # 5. For each candidate, determine verdict
     threshold = float(req.threshold if req.threshold is not None else 88.0)
+    ranked_results = []
+    for i, item in enumerate(gallery_candidates):
+        s_pct = float(sim_pcts[i])
+        s_val = float(sims[i])
+        dist = float(l2_dists[i])
 
-    for cand in gallery_candidates:
-        c_vec = np.array(cand.embedding, dtype=float)
-        c_norm = np.linalg.norm(c_vec)
-        if c_norm > 0:
-            c_vec = c_vec / c_norm
-
-        sim_val = float(np.dot(q_vec, c_vec))
-        sim_pct = max(0.0, min(100.0, sim_val * 100.0))
-        l2_dist = float(np.linalg.norm(q_vec - c_vec))
-
-        if sim_pct >= 88.0:
-            verdict = "MATCH"
-            verdict_color = "emerald"
-        elif sim_pct >= 78.0:
+        if s_pct >= 88.0:
+            verdict = "MATCH (Confirmed Same Cattle)"
+            badge = "match"
+            color = "emerald"
+        elif s_pct >= 78.0:
             verdict = "LIKELY MATCH"
-            verdict_color = "teal"
-        elif sim_pct >= 65.0:
+            badge = "likely"
+            color = "teal"
+        elif s_pct >= 65.0:
             verdict = "INCONCLUSIVE"
-            verdict_color = "amber"
+            badge = "inconclusive"
+            color = "amber"
         else:
-            verdict = "DISTINCT"
-            verdict_color = "rose"
+            verdict = "DISTINCT (Different Animals)"
+            badge = "distinct"
+            color = "rose"
 
-        leaderboard.append({
-            "id": cand.id,
-            "name": cand.name,
-            "tag": cand.tag or "N/A",
-            "breed": cand.breed or "Unknown",
-            "registered_date": cand.registered_date or "",
-            "similarity_pct": round(sim_pct, 2),
-            "l2_distance": round(l2_dist, 4),
-            "is_match": sim_pct >= threshold,
+        meta_dict = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+        cand_dict = {
+            "id": str(item.get("id", f"candidate_{i}")),
+            "name": str(item.get("name", f"Candidate {i+1}")),
+            "similarity": round(s_val, 4),
+            "similarity_pct": round(s_pct, 2),
+            "l2_distance": round(dist, 4),
             "verdict": verdict,
-            "verdict_color": verdict_color,
-        })
+            "badge": badge,
+            "color": color,
+            "verdict_color": color,
+            "notes": item.get("notes"),
+            "tag": item.get("tag") or meta_dict.get("tag") or "N/A",
+            "breed": item.get("breed") or meta_dict.get("breed") or "Unknown",
+            "registered_date": item.get("registered_date") or meta_dict.get("registered_date") or "",
+            "meta": meta_dict,
+            "is_match": bool(s_pct >= threshold),
+        }
+        ranked_results.append(cand_dict)
 
-    leaderboard.sort(key=lambda x: x["similarity_pct"], reverse=True)
-    for i, item in enumerate(leaderboard):
-        item["rank"] = i + 1
+    # 6. Rank candidates descending by similarity score
+    ranked_results.sort(key=lambda x: x["similarity_pct"], reverse=True)
+    for rank_idx, r in enumerate(ranked_results, start=1):
+        r["rank"] = rank_idx
 
-    top_match = leaderboard[0] if leaderboard else None
-    second_match = leaderboard[1] if len(leaderboard) > 1 else None
-    margin = round(top_match["similarity_pct"] - (second_match["similarity_pct"] if second_match else 0.0), 2) if top_match else 0.0
+    top_match = ranked_results[0] if ranked_results else None
+    margin_to_runner_up = (
+        round(float(ranked_results[0]["similarity_pct"] - ranked_results[1]["similarity_pct"]), 2)
+        if len(ranked_results) > 1
+        else None
+    )
 
-    is_top_match = bool(top_match and top_match["similarity_pct"] >= threshold)
-    verdict_text = f"MATCH FOUND: {top_match['name']}" if is_top_match else "NO MATCH (All Distinct Animals)"
-
+    is_confirmed = bool(top_match and top_match["similarity_pct"] >= threshold)
     return {
         "success": True,
-        "top_match": {
-            **top_match,
-            "margin_ahead_pct": margin,
-        } if top_match else None,
-        "verdict": verdict_text,
-        "verdict_is_match": is_top_match,
-        "verdict_color": "emerald" if is_top_match else "rose",
-        "margin_ahead_pct": margin,
+        "query_dim": dim,
+        "total_candidates": len(ranked_results),
+        "top_match": top_match,
+        "margin_to_runner_up": margin_to_runner_up,
+        "ranked_results": ranked_results,
+        # Backward compatibility and UI integration fields
+        "margin_ahead_pct": margin_to_runner_up if margin_to_runner_up is not None else 0.0,
+        "leaderboard": ranked_results,
+        "total_gallery_candidates": len(ranked_results),
+        "verdict": f"MATCH FOUND: {top_match['name']}" if is_confirmed else "NO MATCH (All Distinct Animals)",
+        "verdict_is_match": is_confirmed,
+        "verdict_color": "emerald" if is_confirmed else "rose",
         "threshold": threshold,
-        "leaderboard": leaderboard,
-        "total_gallery_candidates": len(leaderboard),
     }
+
+
+# Backwards compatibility aliases
+match_one_to_n_endpoint = one_to_n_match_endpoint
+get_gallery_presets_endpoint = get_embedding_gallery_presets_endpoint
+
+
+class SingleVideoEmbeddingExportRequest(BaseModel):
+    video_path: str
+    pool_method: Optional[str] = "median"  # 'median' or 'mean'
+    method: Optional[str] = "frangi"
+    threshold_method: Optional[str] = "adaptive"
+    adaptive_block_size: Optional[int] = 15
+    adaptive_c: Optional[int] = 2
+    exclude_nostrils: Optional[bool] = True
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
+    min_spur_length: Optional[int] = 8
+    min_component_size: Optional[int] = 30
+    dl_backbone: Optional[str] = "convnext_tiny"
+    dl_input_mode: Optional[str] = "composite_3ch"
+
+
+async def _handle_single_video_embedding_export(
+    video_path: str,
+    pool_method: str = "median",
+    req_opts: Optional[SingleVideoEmbeddingExportRequest] = None,
+) -> Dict[str, Any]:
+    resolved_v = resolve_video_path(video_path)
+    if not resolved_v or not resolved_v.exists():
+        raise HTTPException(status_code=404, detail=f"Video not found: {video_path}")
+
+    chosen_pool = pool_method or "median"
+
+    # Search existing summary.json in output/video_five_frames/
+    vff_dir = OUTPUT_DIR / "video_five_frames"
+    stem = resolved_v.stem
+    cand_summaries = list(vff_dir.glob(f"*{stem}*/summary.json"))
+    name_no_ts = "_".join(stem.split("_")[1:]) if "_" in stem else stem
+    if name_no_ts and name_no_ts != stem:
+        cand_summaries.extend(vff_dir.glob(f"*{name_no_ts}*/summary.json"))
+
+    for c_path in sorted(cand_summaries, reverse=True):
+        try:
+            data = json.loads(c_path.read_text(encoding="utf-8"))
+            dl = data.get("dl_embedding")
+            emb = _extract_embedding_from_summary(data, pool_method=chosen_pool)
+            if emb:
+                return {
+                    "success": True,
+                    "video_name": resolved_v.name,
+                    "video_path": str(resolved_v),
+                    "embedding": emb,
+                    "embedding_dim": len(emb),
+                    "pool_method": chosen_pool,
+                    "intra_video_consistency_pct": dl.get("intra_video_consistency_pct") if dl else None,
+                    "cached": True,
+                    "summary_path": str(c_path.relative_to(BASE_DIR)),
+                    "dl_summary": {
+                        "backbone": dl.get("backbone") if dl else "convnext_tiny",
+                        "input_mode": dl.get("input_mode") if dl else "composite_3ch",
+                        "weights_mode": dl.get("weights_mode") if dl else "pretrained_gem_zeroshot",
+                        "avg_inference_ms": dl.get("avg_inference_ms") if dl else None,
+                    } if dl else {},
+                }
+        except Exception as exc:
+            logger.debug(f"Error reading summary {c_path}: {exc}")
+
+    # Not cached: compute on demand
+    from functools import partial
+    fn = partial(
+        extract_five_frames_groove_features,
+        video_path=str(resolved_v),
+        method=req_opts.method if req_opts else "frangi",
+        threshold_method=req_opts.threshold_method if req_opts else "adaptive",
+        adaptive_block_size=int(req_opts.adaptive_block_size or 15) if req_opts else 15,
+        adaptive_c=int(req_opts.adaptive_c or 2) if req_opts else 2,
+        exclude_nostrils=bool(req_opts.exclude_nostrils if (req_opts and req_opts.exclude_nostrils is not None) else True),
+        device=req_opts.device if req_opts else "cpu",
+        cpu_cores=int(req_opts.cpu_cores or 6) if req_opts else 6,
+        min_spur_length=int(req_opts.min_spur_length or 8) if req_opts else 8,
+        min_component_size=int(req_opts.min_component_size or 30) if req_opts else 30,
+        dl_backbone=req_opts.dl_backbone if req_opts else "convnext_tiny",
+        dl_input_mode=req_opts.dl_input_mode if req_opts else "composite_3ch",
+        enable_dl_embedding=True,
+    )
+    async with _EXTRACTION_LOCK:
+        res = await asyncio.to_thread(fn)
+
+    emb = _extract_embedding_from_summary(res, pool_method=chosen_pool)
+    if not emb:
+        raise HTTPException(status_code=500, detail="Failed to extract biometric embedding from video.")
+
+    dl = res.get("dl_embedding") or {}
+    return {
+        "success": True,
+        "video_name": resolved_v.name,
+        "video_path": str(resolved_v),
+        "embedding": emb,
+        "embedding_dim": len(emb),
+        "pool_method": chosen_pool,
+        "intra_video_consistency_pct": dl.get("intra_video_consistency_pct"),
+        "cached": False,
+        "dl_summary": {
+            "backbone": dl.get("backbone"),
+            "input_mode": dl.get("input_mode"),
+            "weights_mode": dl.get("weights_mode"),
+            "avg_inference_ms": dl.get("avg_inference_ms"),
+        },
+    }
+
+
+@app.post("/api/embedding/export")
+async def export_single_video_embedding_post(req: SingleVideoEmbeddingExportRequest):
+    """
+    POST /api/embedding/export:
+    Exports single cattle video 512-D ArcFace/GeM Biometric Embedding vector.
+    """
+    return await _handle_single_video_embedding_export(
+        video_path=req.video_path,
+        pool_method=req.pool_method or "median",
+        req_opts=req,
+    )
+
+
+@app.get("/api/embedding/export")
+async def export_single_video_embedding_get(
+    video_path: str = Query(..., description="Path or filename of video"),
+    pool_method: Optional[str] = Query("median", description="'median' or 'mean'"),
+):
+    """
+    GET /api/embedding/export:
+    Exports single cattle video 512-D ArcFace/GeM Biometric Embedding vector.
+    """
+    return await _handle_single_video_embedding_export(
+        video_path=video_path,
+        pool_method=pool_method or "median",
+    )
 
 
 @app.get("/api/video/match-config")
