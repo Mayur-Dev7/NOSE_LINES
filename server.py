@@ -991,9 +991,10 @@ def _json_safe_frame(frame):
 
 
 def _spatial_cache_key(video_path, method, threshold_method, adaptive_block_size, adaptive_c,
-                       exclude_nostrils, min_spur_length, min_component_size, device, cpu_cores):
+                       exclude_nostrils, min_spur_length, min_component_size, device, cpu_cores,
+                       dl_backbone="convnext_tiny", dl_input_mode="composite_3ch"):
     stat = Path(video_path).stat()
-    signature = f"{Path(video_path).resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{method}:{threshold_method}:{adaptive_block_size}:{adaptive_c}:{exclude_nostrils}:{min_spur_length}:{min_component_size}:{device}:{cpu_cores}"
+    signature = f"{Path(video_path).resolve()}:{stat.st_size}:{stat.st_mtime_ns}:{method}:{threshold_method}:{adaptive_block_size}:{adaptive_c}:{exclude_nostrils}:{min_spur_length}:{min_component_size}:{device}:{cpu_cores}:{dl_backbone}:{dl_input_mode}"
     return hashlib.sha256(signature.encode("utf-8")).hexdigest()
 
 
@@ -1024,6 +1025,9 @@ def _extract_video_for_spatial_match(video_path, req):
         cpu_cores=int(req.cpu_cores or 6),
         min_spur_length=int(req.min_spur_length or 8),
         min_component_size=int(req.min_component_size or 30),
+        dl_backbone=getattr(req, "dl_backbone", "convnext_tiny") or "convnext_tiny",
+        dl_input_mode=getattr(req, "dl_input_mode", "composite_3ch") or "composite_3ch",
+        enable_dl_embedding=True,
     )
 
 class ExtractVideoFiveFramesRequest(BaseModel):
@@ -1037,12 +1041,15 @@ class ExtractVideoFiveFramesRequest(BaseModel):
     cpu_cores: Optional[int] = 6
     min_spur_length: Optional[int] = 8
     min_component_size: Optional[int] = 30
+    dl_backbone: Optional[str] = "convnext_tiny"         # 'convnext_tiny' or 'resnet50'
+    dl_input_mode: Optional[str] = "composite_3ch"       # 'composite_3ch', 'skeleton_only', 'groove_map'
+    enable_dl_embedding: Optional[bool] = True
 
 @app.post("/api/video/extract-five-muzzle-parameters")
 async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest):
     """
-    Extracts 5 muzzle images and ten display parameters. The backend caches internal
-    NumPy arrays for spatial matching and strips those arrays from the HTTP response.
+    Extracts 5 muzzle images, ten topological parameters, and 512-D Deep Learning Biometric Embeddings.
+    The backend caches internal NumPy arrays for spatial matching and strips those arrays from the HTTP response.
     """
     resolved_v = resolve_video_path(req.video_path)
     if not resolved_v or not resolved_v.exists():
@@ -1061,6 +1068,9 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
         cpu_cores=int(req.cpu_cores or 6),
         min_spur_length=int(req.min_spur_length or 8),
         min_component_size=int(req.min_component_size or 30),
+        dl_backbone=req.dl_backbone or "convnext_tiny",
+        dl_input_mode=req.dl_input_mode or "composite_3ch",
+        enable_dl_embedding=bool(req.enable_dl_embedding if req.enable_dl_embedding is not None else True),
     )
     try:
         async with _EXTRACTION_LOCK:
@@ -1076,6 +1086,8 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
             int(req.min_component_size or 30),
             req.device or "cpu",
             int(req.cpu_cores or 6),
+            req.dl_backbone or "convnext_tiny",
+            req.dl_input_mode or "composite_3ch",
         )
         _put_extraction_cache(cache_key, res.get("frames") or [])
         safe = dict(res)
@@ -1090,6 +1102,31 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
 class CosineSimilarityRequest(BaseModel):
     vector_a: List[float]
     vector_b: List[float]
+    dl_emb_a: Optional[List[float]] = None
+    dl_emb_b: Optional[List[float]] = None
+    per_frames_a: Optional[List[List[float]]] = None
+    per_frames_b: Optional[List[List[float]]] = None
+
+
+@app.post("/api/video/cosine-similarity")
+@app.post("/api/video/dl-cosine-similarity")
+async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
+    """
+    Computes Normalized Cosine Similarity on classical 10-D graph minutiae parameters
+    and Deep Learning Biometric Embeddings (ConvNeXt-Tiny / ResNet-50 ArcFace/GeM).
+    """
+    try:
+        res = compute_cosine_similarity(
+            vec_a=req.vector_a,
+            vec_b=req.vector_b,
+            dl_emb_a=req.dl_emb_a,
+            dl_emb_b=req.dl_emb_b,
+            per_frames_a=req.per_frames_a,
+            per_frames_b=req.per_frames_b,
+        )
+        return res
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Cosine similarity calculation failed: {exc}")
 
 
 @app.get("/api/video/match-config")

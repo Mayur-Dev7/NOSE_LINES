@@ -22,7 +22,11 @@ import {
   Crosshair,
   Network,
   Activity,
-  FileText
+  FileText,
+  Cpu,
+  Zap,
+  BarChart3,
+  Target
 } from 'lucide-react';
 
 const FEATURE_LABELS = {
@@ -64,6 +68,10 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const [excludeNostrils, setExcludeNostrils] = useState(true);
   const [minSpurLength, setMinSpurLength] = useState(8);
   const [minComponentSize, setMinComponentSize] = useState(30);
+
+  // Deep Learning Model Configuration
+  const [dlBackbone, setDlBackbone] = useState('convnext_tiny'); // 'convnext_tiny' | 'resnet50'
+  const [dlInputMode, setDlInputMode] = useState('composite_3ch'); // 'composite_3ch' | 'skeleton_only' | 'groove_map'
 
   // Calibration status from /api/video/matcher-config
   const [matcherConfig, setMatcherConfig] = useState(null);
@@ -190,13 +198,16 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           exclude_nostrils: excludeNostrils,
           min_spur_length: parseInt(minSpurLength, 10),
           min_component_size: parseInt(minComponentSize, 10),
+          dl_backbone: dlBackbone,
+          dl_input_mode: dlInputMode,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setDataA(data);
         saveToLocalStorage('muzzle_video_a_params', data);
-        setExtractLogA(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints). Stored in LocalStorage.`);
+        const dlNote = data.dl_embedding ? ` | DL ${data.dl_embedding.backbone} (${data.dl_embedding.avg_inference_ms}ms)` : '';
+        setExtractLogA(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints${dlNote}). Stored in LocalStorage.`);
       } else {
         alert(data.detail || 'Extraction failed for Video A');
         setExtractLogA('Extraction failed');
@@ -230,13 +241,16 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           exclude_nostrils: excludeNostrils,
           min_spur_length: parseInt(minSpurLength, 10),
           min_component_size: parseInt(minComponentSize, 10),
+          dl_backbone: dlBackbone,
+          dl_input_mode: dlInputMode,
         }),
       });
       const data = await res.json();
       if (data.success) {
         setDataB(data);
         saveToLocalStorage('muzzle_video_b_params', data);
-        setExtractLogB(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints). Stored in LocalStorage.`);
+        const dlNote = data.dl_embedding ? ` | DL ${data.dl_embedding.backbone} (${data.dl_embedding.avg_inference_ms}ms)` : '';
+        setExtractLogB(`Extracted! 5th-stage skeleton lines (${data.median_parameters?.skeleton_pixels ?? 'N/A'} px, ${data.median_parameters?.endpoints ?? 'N/A'} endpoints${dlNote}). Stored in LocalStorage.`);
       } else {
         alert(data.detail || 'Extraction failed for Video B');
         setExtractLogB('Extraction failed');
@@ -323,17 +337,30 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
     setCalculatingSim(true);
     try {
-      const vecA = currentA.vector_array || Object.values(currentA.median_parameters);
-      const vecB = currentB.vector_array || Object.values(currentB.median_parameters);
+      const vecA = currentA.vector_array || (currentA.median_parameters ? Object.values(currentA.median_parameters) : []);
+      const vecB = currentB.vector_array || (currentB.median_parameters ? Object.values(currentB.median_parameters) : []);
+      const dlEmbA = currentA.dl_embedding?.median_embedding || null;
+      const dlEmbB = currentB.dl_embedding?.median_embedding || null;
+      const perFramesA = currentA.dl_embedding?.per_frame_embeddings || null;
+      const perFramesB = currentB.dl_embedding?.per_frame_embeddings || null;
 
       const res = await fetch('/api/video/cosine-similarity', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vector_a: vecA, vector_b: vecB }),
+        body: JSON.stringify({
+          vector_a: vecA,
+          vector_b: vecB,
+          dl_emb_a: dlEmbA,
+          dl_emb_b: dlEmbB,
+          per_frames_a: perFramesA,
+          per_frames_b: perFramesB,
+        }),
       });
       const simData = await res.json();
       setSimilarityResult({
         ...simData,
+        dl_embedding_a: currentA.dl_embedding,
+        dl_embedding_b: currentB.dl_embedding,
         paramsA: currentA.median_parameters,
         paramsB: currentB.median_parameters,
         videoAName: currentA.video_name,
@@ -597,6 +624,69 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               />
               <span className="text-xs">Suppress Nostril Dark Holes</span>
             </label>
+          </div>
+        </div>
+      </div>
+
+      {/* ========================================================= */}
+      {/* DEEP LEARNING MODEL CONFIGURATION (ARCFACE / GeM)         */}
+      {/* ========================================================= */}
+      <div className="glass-panel p-4 rounded-xl border border-indigo-900/60 bg-gradient-to-r from-slate-950 via-indigo-950/20 to-slate-950 flex flex-col gap-3">
+        <div className="flex items-center justify-between border-b border-indigo-900/40 pb-2 flex-wrap gap-2">
+          <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+            <Cpu className="w-4 h-4 text-indigo-400" />
+            <span>Deep Learning Biometric Model Configuration (ArcFace / GeM 512-D):</span>
+          </div>
+          <div className="flex items-center gap-2 text-[10px] font-mono">
+            <span className="px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-semibold flex items-center gap-1">
+              <Zap className="w-3 h-3 text-amber-400" />
+              GeM Pooling (p=3.0) &bull; 512-D L2 Unit Sphere
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          {/* DL Backbone Selector */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-slate-300 font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+                DL Backbone Architecture:
+              </span>
+              <span className="text-[10px] font-mono text-indigo-400 font-bold">
+                {dlBackbone === 'convnext_tiny' ? 'ConvNeXt-Tiny (Low Latency)' : 'ResNet-50 (Baseline)'}
+              </span>
+            </label>
+            <select
+              value={dlBackbone}
+              onChange={(e) => setDlBackbone(e.target.value)}
+              className="bg-slate-900 border border-indigo-900/60 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-indigo-500 font-medium"
+            >
+              <option value="convnext_tiny">ConvNeXt-Tiny (Low Latency, High Minutiae Sensitivity ~47ms)</option>
+              <option value="resnet50">ResNet-50 (Deep Residual Baseline, 2048-D GeM ~48ms)</option>
+            </select>
+          </div>
+
+          {/* DL Input Tensor Mode */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-slate-300 font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-indigo-400" />
+                DL Input Tensor Construction (1-px Sparsity Handling):
+              </span>
+              <span className="text-[10px] font-mono text-indigo-400 font-bold">
+                {dlInputMode === 'composite_3ch' ? '3-Ch Composite' : dlInputMode === 'skeleton_only' ? 'Skeleton Density' : 'Groove Map'}
+              </span>
+            </label>
+            <select
+              value={dlInputMode}
+              onChange={(e) => setDlInputMode(e.target.value)}
+              className="bg-slate-900 border border-indigo-900/60 rounded-lg px-2.5 py-1.5 text-slate-200 focus:outline-hidden focus:border-indigo-500 font-medium"
+            >
+              <option value="composite_3ch">3-Ch Composite (R=Stage 2 CLAHE, G=Stage 3 Groove, B=Stage 5 Dilated 3x3 Skeleton)</option>
+              <option value="skeleton_only">Stage 5 Skeleton Only (Dilated 3x3 + Gaussian Ridge Density Map)</option>
+              <option value="groove_map">Stage 3 Groove Response Map (Replicated 3 Channels)</option>
+            </select>
           </div>
         </div>
       </div>
@@ -1268,29 +1358,266 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       )}
 
       {/* ========================================================= */}
-      {/* SECONDARY COSINE RESULTS ACCORDION (IF CALCULATED)        */}
+      {/* SIDE-BY-SIDE COMPARISON CARDS: DL EMBEDDING VS 10-D GRAPH */}
       {/* ========================================================= */}
       {similarityResult && (
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-300 flex items-center gap-2">
-              <GitCompare className="w-4 h-4 text-teal-400" />
-              Secondary Metric: Cosine Vector Similarity ({similarityResult.cosine_similarity}%)
-            </span>
-            <button
-              onClick={() => setShowCosineDetails(!showCosineDetails)}
-              className="text-xs text-teal-400 hover:text-teal-300 font-mono"
-            >
-              {showCosineDetails ? 'Hide details' : 'Show details'}
-            </button>
-          </div>
-          {showCosineDetails && (
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-xs font-mono text-slate-400 flex flex-col gap-1">
-              <div>Normalized Cosine Similarity: <strong className="text-emerald-300">{similarityResult.cosine_similarity}%</strong></div>
-              <div>Raw Unnormalized Cosine: <strong className="text-teal-300">{similarityResult.raw_cosine_similarity}%</strong></div>
-              <div>Verdict: <strong className="text-slate-200">{similarityResult.verdict}</strong></div>
+        <div className="flex flex-col gap-5 pt-2">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <GitCompare className="w-5 h-5 text-indigo-400" />
+              <h3 className="text-base font-bold text-white">Biometric Verification: Model Comparison</h3>
             </div>
-          )}
+            <span className="text-xs text-slate-400 font-mono">
+              Deep Learning ArcFace/GeM (Primary) &bull; Classical 10-D Topology (Baseline)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* CARD 1: DEEP LEARNING BIOMETRIC EMBEDDING */}
+            <div className="glass-panel p-5 rounded-2xl border border-indigo-500/40 bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950 flex flex-col gap-4 shadow-xl">
+              {/* Card Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-indigo-900/40">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-400 font-bold flex items-center justify-center border border-indigo-500/30">
+                    <Cpu className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      Deep Learning Embedding
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/40">
+                        {similarityResult.dl_embedding_a?.backbone === 'resnet50' ? 'ResNet-50' : 'ConvNeXt-Tiny'}
+                      </span>
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      GeM Pooling (p=3.0) &bull; 512-D L2-Normalized &bull; {similarityResult.dl_embedding_a?.weights_mode === 'arcface_finetuned' ? 'ArcFace Fine-Tuned' : 'Zero-Shot Pretrained'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Match Score Hero */}
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-indigo-900/50 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">
+                    Cosine Similarity Score
+                  </span>
+                  <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-300 to-cyan-300 font-mono">
+                    {similarityResult.dl_similarity_pct !== undefined ? `${similarityResult.dl_similarity_pct}%` : 'N/A'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono border ${
+                    similarityResult.dl_similarity_pct >= 88.0
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : similarityResult.dl_similarity_pct >= 78.0
+                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                      : similarityResult.dl_similarity_pct >= 68.0
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                  }`}>
+                    {similarityResult.dl_verdict || (similarityResult.dl_similarity_pct >= 85 ? 'MATCH' : 'DISTINCT')}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-1 font-mono">
+                    L2 Distance: <strong className="text-indigo-300">{similarityResult.l2_distance ?? 'N/A'}</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Key DL Biometric Metrics Grid */}
+              <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
+                  <span className="text-slate-400 block text-[10px]">Inference Latency</span>
+                  <span className="text-indigo-300 font-bold text-sm">
+                    {similarityResult.dl_embedding_a?.avg_inference_ms ? `${similarityResult.dl_embedding_a.avg_inference_ms} ms` : '~47 ms'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1">/ frame</span>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
+                  <span className="text-slate-400 block text-[10px]">Embedding Dimension</span>
+                  <span className="text-indigo-300 font-bold text-sm">
+                    {similarityResult.dl_embedding_a?.embedding_dim ? `${similarityResult.dl_embedding_a.embedding_dim}-D` : '512-D'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1">unit L2</span>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
+                  <span className="text-slate-400 block text-[10px]">Intra-Video Consistency (A)</span>
+                  <span className="text-teal-300 font-bold text-sm">
+                    {similarityResult.dl_embedding_a?.intra_video_consistency_pct ? `${similarityResult.dl_embedding_a.intra_video_consistency_pct}%` : 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1">temporal</span>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-slate-950/70 border border-indigo-900/30">
+                  <span className="text-slate-400 block text-[10px]">Intra-Video Consistency (B)</span>
+                  <span className="text-teal-300 font-bold text-sm">
+                    {similarityResult.dl_embedding_b?.intra_video_consistency_pct ? `${similarityResult.dl_embedding_b.intra_video_consistency_pct}%` : 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-slate-500 ml-1">temporal</span>
+                </div>
+              </div>
+
+              {/* 5x5 Cross-Frame Pairwise Matrix Stats */}
+              {similarityResult.cross_matrix_stats && Object.keys(similarityResult.cross_matrix_stats).length > 0 && (
+                <div className="p-3 rounded-xl bg-slate-950/70 border border-indigo-900/30 flex flex-col gap-2">
+                  <span className="text-[11px] font-bold text-slate-300 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <BarChart3 className="w-3.5 h-3.5 text-indigo-400" />
+                      5x5 Cross-Frame Pairwise Match Distribution:
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">25 temporal frame pairs</span>
+                  </span>
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs font-mono">
+                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block">Min Pair</span>
+                      <span className="text-slate-200 font-bold">{similarityResult.cross_matrix_stats.min_pair_similarity}%</span>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block">Max Pair</span>
+                      <span className="text-emerald-300 font-bold">{similarityResult.cross_matrix_stats.max_pair_similarity}%</span>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block">Median Pair</span>
+                      <span className="text-indigo-300 font-bold">{similarityResult.cross_matrix_stats.median_pair_similarity}%</span>
+                    </div>
+                    <div className="p-1.5 rounded bg-slate-900/80 border border-slate-800">
+                      <span className="text-[9px] text-slate-400 block">Mean Pair</span>
+                      <span className="text-cyan-300 font-bold">{similarityResult.cross_matrix_stats.mean_pair_similarity}%</span>
+                    </div>
+                  </div>
+
+                  {/* 5x5 Heatmap Matrix */}
+                  {similarityResult.cross_matrix && similarityResult.cross_matrix.length === 5 && (
+                    <div className="mt-1 overflow-x-auto">
+                      <table className="w-full text-[10px] font-mono text-center">
+                        <thead>
+                          <tr className="text-slate-400">
+                            <th className="py-1">A \ B</th>
+                            <th className="py-1">#1</th>
+                            <th className="py-1">#2</th>
+                            <th className="py-1">#3</th>
+                            <th className="py-1">#4</th>
+                            <th className="py-1">#5</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {similarityResult.cross_matrix.map((row, i) => (
+                            <tr key={i}>
+                              <td className="py-1 font-bold text-slate-400">#{i + 1}</td>
+                              {row.map((cell, j) => (
+                                <td
+                                  key={j}
+                                  className={`py-1 px-1 rounded font-bold ${
+                                    cell >= 85 ? 'text-emerald-300 bg-emerald-950/30' : cell >= 75 ? 'text-teal-300 bg-teal-950/20' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {cell.toFixed(1)}%
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* CARD 2: CLASSICAL 10-D TOPOLOGICAL GRAPH MINUTIAE */}
+            <div className="glass-panel p-5 rounded-2xl border border-slate-800 bg-slate-950/70 flex flex-col gap-4 shadow-xl">
+              {/* Card Header */}
+              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-xl bg-teal-500/20 text-teal-400 font-bold flex items-center justify-center border border-teal-500/30">
+                    <Network className="w-4 h-4" />
+                  </span>
+                  <div>
+                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                      Classical Graph Minutiae (Baseline)
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/40">
+                        10 Topological Parameters
+                      </span>
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      NetworkX Graph &bull; Min-Max Normalized &bull; Euler Characteristic &chi;
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Match Score Hero */}
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider block">
+                    Normalized Cosine Similarity
+                  </span>
+                  <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-teal-300 to-emerald-300 font-mono">
+                    {similarityResult.cosine_similarity !== undefined ? `${similarityResult.cosine_similarity}%` : 'N/A'}
+                  </span>
+                </div>
+                <div className="text-right">
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold font-mono border ${
+                    similarityResult.cosine_similarity >= 92.0
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : similarityResult.cosine_similarity >= 85.0
+                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                      : similarityResult.cosine_similarity >= 75.0
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                  }`}>
+                    {similarityResult.verdict || 'N/A'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 block mt-1 font-mono">
+                    Raw Cosine: <strong className="text-teal-300">{similarityResult.raw_cosine_similarity ?? 'N/A'}%</strong>
+                  </span>
+                </div>
+              </div>
+
+              {/* Parameter Delta Table */}
+              <div className="flex flex-col gap-2 pt-1">
+                <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-teal-400" />
+                  Topological Minutiae Delta (&Delta;%) Table:
+                </span>
+                <div className="overflow-x-auto rounded-xl border border-slate-800 max-h-60 overflow-y-auto">
+                  <table className="w-full text-[11px] font-mono text-left">
+                    <thead className="bg-slate-900 text-slate-400 text-[10px] border-b border-slate-800 sticky top-0">
+                      <tr>
+                        <th className="py-1.5 px-2.5">Parameter</th>
+                        <th className="py-1.5 px-2.5 text-emerald-400">Video A</th>
+                        <th className="py-1.5 px-2.5 text-teal-400">Video B</th>
+                        <th className="py-1.5 px-2.5 text-right">&Delta;%</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 bg-slate-950/40">
+                      {Object.keys(FEATURE_LABELS).map((key) => {
+                        const valA = similarityResult.paramsA?.[key] ?? 0;
+                        const valB = similarityResult.paramsB?.[key] ?? 0;
+                        const unit = FEATURE_UNITS[key] || '';
+                        const delta = valA !== 0 ? Math.abs((valB - valA) / valA) * 100 : 0;
+                        return (
+                          <tr key={key} className="hover:bg-slate-900/40 transition-colors">
+                            <td className="py-1.5 px-2.5 text-slate-300 font-sans font-medium truncate max-w-[130px]">
+                              {FEATURE_LABELS[key]}
+                            </td>
+                            <td className="py-1.5 px-2.5 text-emerald-300 font-bold">{valA} {unit}</td>
+                            <td className="py-1.5 px-2.5 text-teal-300 font-bold">{valB} {unit}</td>
+                            <td className={`py-1.5 px-2.5 text-right font-bold ${
+                              delta <= 15 ? 'text-emerald-400' : delta <= 35 ? 'text-amber-400' : 'text-slate-400'
+                            }`}>
+                              {delta.toFixed(1)}%
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

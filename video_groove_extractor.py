@@ -113,10 +113,20 @@ def normalize_feature_vector(vec: List[float]) -> np.ndarray:
     return np.array(normed, dtype=float)
 
 
-def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> Dict[str, Any]:
+def compute_cosine_similarity(
+    vec_a: List[float],
+    vec_b: List[float],
+    dl_emb_a: Optional[List[float]] = None,
+    dl_emb_b: Optional[List[float]] = None,
+    per_frames_a: Optional[List[List[float]]] = None,
+    per_frames_b: Optional[List[List[float]]] = None,
+) -> Dict[str, Any]:
     """
     Computes Cosine Similarity between two 10-D feature vectors:
     Cosine Similarity = (A . B) / (||A|| * ||B||) * 100%
+
+    If deep learning embeddings (dl_emb_a, dl_emb_b) are provided, also calculates
+    the DL ArcFace/GeM Cosine Similarity, L2 distance, and 5x5 cross-frame matrix.
     """
     v1 = np.array(vec_a, dtype=float)
     v2 = np.array(vec_b, dtype=float)
@@ -150,7 +160,7 @@ def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> Dict[st
         verdict = "DISTINCT (Different Animals)"
         verdict_color = "rose"
 
-    return {
+    result: Dict[str, Any] = {
         "cosine_similarity": round(norm_sim, 2),
         "raw_cosine_similarity": round(raw_sim, 2),
         "is_match": is_match,
@@ -159,6 +169,23 @@ def compute_cosine_similarity(vec_a: List[float], vec_b: List[float]) -> Dict[st
         "vector_a": [round(float(x), 3) for x in vec_a],
         "vector_b": [round(float(x), 3) for x in vec_b],
     }
+
+    # Deep learning embedding matching if provided
+    if dl_emb_a is not None and dl_emb_b is not None:
+        try:
+            from dl_muzzle_embedder import compute_dl_cosine_similarity as calc_dl_sim
+            dl_res = calc_dl_sim(dl_emb_a, dl_emb_b, per_frames_a, per_frames_b)
+            result["dl_similarity_pct"] = dl_res["dl_similarity_pct"]
+            result["l2_distance"] = dl_res["l2_distance"]
+            result["dl_verdict"] = dl_res["verdict"]
+            result["dl_badge_variant"] = dl_res["badge_variant"]
+            result["dl_badge_color"] = dl_res["badge_color"]
+            result["cross_matrix"] = dl_res.get("cross_matrix", [])
+            result["cross_matrix_stats"] = dl_res.get("cross_matrix_stats", {})
+        except Exception as e:
+            logger.warning(f"DL similarity computation note: {e}")
+
+    return result
 
 
 def align_muzzle_canonical(
@@ -374,6 +401,9 @@ def extract_five_muzzle_stages(
     log_callback: Optional[Any] = None,
     min_spur_length: int = 8,
     min_component_size: int = 30,
+    dl_backbone: str = "convnext_tiny",
+    dl_input_mode: str = "composite_3ch",
+    enable_dl_embedding: bool = True,
 ) -> Dict[str, Any]:
     """
     Genuine end-to-end extraction with quality gating and canonical alignment:
@@ -611,6 +641,18 @@ def extract_five_muzzle_stages(
 
     log(f"Selected {len(detected_candidates)} frames for groove extraction: {[c['frame_idx'] for c in detected_candidates]}")
 
+    # Deep learning embedder initialization
+    dl_model = None
+    dl_frame_embeddings: List[np.ndarray] = []
+    dl_latencies: List[float] = []
+    if enable_dl_embedding:
+        try:
+            from dl_muzzle_embedder import get_muzzle_embedder, extract_frame_embedding, aggregate_temporal_embeddings
+            dl_model = get_muzzle_embedder(backbone=dl_backbone, device=device)
+            log(f"Deep learning embedder active: backbone={dl_backbone} ({dl_model.weights_mode}) | input_mode='{dl_input_mode}'")
+        except Exception as e:
+            log(f"Warning: Could not initialize deep learning embedder: {e}")
+
     # Step 4: Process the 5 frames through canonical alignment, 2x Lanczos-4, CLAHE grayscale, groove filter, threshold, and skeleton pruning
     frames_records = []
     param_lists: Dict[str, List[float]] = {k: [] for k in FEATURE_KEYS}
@@ -736,6 +778,26 @@ def extract_five_muzzle_stages(
         matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
+        # Extract Deep Learning Biometric Embedding for this frame
+        dl_frame_emb = None
+        dl_lat_ms = 0.0
+        if dl_model is not None:
+            try:
+                from dl_muzzle_embedder import extract_frame_embedding
+                dl_frame_emb, dl_lat_ms = extract_frame_embedding(
+                    model=dl_model,
+                    clahe_gray=matcher_gray,
+                    groove_response=groove_response,
+                    skeleton=pruned_skeleton,
+                    mask=matcher_mask,
+                    input_mode=dl_input_mode,
+                    device=device,
+                )
+                dl_frame_embeddings.append(dl_frame_emb)
+                dl_latencies.append(dl_lat_ms)
+            except Exception as e:
+                log(f"Warning: DL embedding extraction failed on frame {i + 1}: {e}")
+
         frames_records.append({
             "frame_number": i + 1,
             "frame_idx": f_idx,
@@ -762,8 +824,10 @@ def extract_five_muzzle_stages(
             "alignment_method": alignment_method,
             "rotation_deg": round(float(angle_deg), 2),
             "minutiae": minutiae,
+            "dl_embedding": np.round(dl_frame_emb, 5).tolist() if dl_frame_emb is not None else [],
+            "dl_inference_ms": dl_lat_ms,
         })
-        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae")
+        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae" + (f" | DL {dl_lat_ms:.1f}ms" if dl_lat_ms > 0 else ""))
 
     # Aggregate median parameter vector across the 5 frames
     median_params: Dict[str, float] = {}
@@ -776,6 +840,25 @@ def extract_five_muzzle_stages(
         vector_array.append(round(med, 3))
 
     normalized_vector = [round(float(x), 4) for x in normalize_feature_vector(vector_array)]
+
+    # Aggregate DL 5-Frame Temporal Embedding
+    dl_summary = None
+    if dl_frame_embeddings:
+        try:
+            from dl_muzzle_embedder import aggregate_temporal_embeddings
+            median_dl_emb, intra_consistency = aggregate_temporal_embeddings(dl_frame_embeddings)
+            dl_summary = {
+                "backbone": dl_backbone,
+                "input_mode": dl_input_mode,
+                "weights_mode": dl_model.weights_mode if dl_model else "pretrained_gem_zeroshot",
+                "embedding_dim": int(len(median_dl_emb)),
+                "per_frame_embeddings": [np.round(e, 5).tolist() for e in dl_frame_embeddings],
+                "median_embedding": np.round(median_dl_emb, 5).tolist(),
+                "avg_inference_ms": round(float(np.mean(dl_latencies)), 2) if dl_latencies else 0.0,
+                "intra_video_consistency_pct": round(float(intra_consistency), 2),
+            }
+        except Exception as e:
+            logger.warning(f"DL temporal aggregation error: {e}")
 
     result = {
         "success": True,
@@ -790,6 +873,7 @@ def extract_five_muzzle_stages(
         "vector_array": vector_array,
         "normalized_vector": normalized_vector,
         "feature_keys": FEATURE_KEYS,
+        "dl_embedding": dl_summary,
         "timestamp": int(time.time()),
     }
 
