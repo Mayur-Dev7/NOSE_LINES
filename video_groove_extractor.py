@@ -615,21 +615,29 @@ def extract_five_muzzle_stages(
     candidate_indices = sorted(list(dict.fromkeys(candidate_indices)))
     log(f"Sampling {len(candidate_indices)} candidate frames across video duration for quality gating...")
 
+    # Single-threaded sequential grab/retrieve frame sampling (7x faster than random seeks, avoids decoder rewinds)
     raw_candidates: List[Dict[str, Any]] = []
-    for f_idx in candidate_indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
-        ret, frame_bgr = cap.read()
-        if not ret or frame_bgr is None:
-            continue
-        gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-        lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        raw_candidates.append({
-            "frame_idx": f_idx,
-            "timestamp_sec": round(float(f_idx / fps), 2),
-            "laplacian_var": lap_var,
-            "frame_bgr": frame_bgr,
-            "gray": gray,
-        })
+    target_indices_set = set(candidate_indices)
+    max_target_idx = candidate_indices[-1] if candidate_indices else -1
+    curr_frame_idx = 0
+
+    while curr_frame_idx <= max_target_idx:
+        ret = cap.grab()
+        if not ret:
+            break
+        if curr_frame_idx in target_indices_set:
+            ret_r, frame_bgr = cap.retrieve()
+            if ret_r and frame_bgr is not None:
+                gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+                lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+                raw_candidates.append({
+                    "frame_idx": curr_frame_idx,
+                    "timestamp_sec": round(float(curr_frame_idx / fps), 2),
+                    "laplacian_var": lap_var,
+                    "frame_bgr": frame_bgr,
+                    "gray": gray,
+                })
+        curr_frame_idx += 1
     cap.release()
 
     if not raw_candidates:
@@ -658,6 +666,13 @@ def extract_five_muzzle_stages(
 
     # Evaluate sharpest candidates first
     detector_candidates.sort(key=lambda c: c["laplacian_var"], reverse=True)
+
+    # Retain the top candidate frames in memory so Step 2 does not re-decode; release unused candidate frame arrays
+    detector_candidate_indices = {c["frame_idx"] for c in detector_candidates}
+    for c in raw_candidates:
+        if c["frame_idx"] not in detector_candidate_indices:
+            c["frame_bgr"] = None
+            c["gray"] = None
     t_sampling_ms = (time.perf_counter() - t_sampling_start) * 1000.0
     log(f"Laplacian pre-screening selected {len(detector_candidates)} sharp candidates (lap_var >= 25.0) for Mask R-CNN.")
 
