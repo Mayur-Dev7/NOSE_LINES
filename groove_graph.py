@@ -15,6 +15,7 @@ import math
 import cv2
 import networkx as nx
 import numpy as np
+import numba
 from skimage.morphology import skeletonize
 
 
@@ -62,6 +63,143 @@ def cluster_junction_pixels(
     return cv2.connectedComponentsWithStats(junc_mask, connectivity=8)
 
 
+@numba.njit(cache=True)
+def _crossing_number(skel: np.ndarray, py: int, px: int) -> int:
+    """Computes the Rutovitz crossing number around pixel (py, px) in a binary skeleton."""
+    H, W = skel.shape
+    # offsets in clockwise order: (-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)
+    v0 = 1 if (py > 0 and skel[py - 1, px] > 0) else 0
+    v1 = 1 if (py > 0 and px + 1 < W and skel[py - 1, px + 1] > 0) else 0
+    v2 = 1 if (px + 1 < W and skel[py, px + 1] > 0) else 0
+    v3 = 1 if (py + 1 < H and px + 1 < W and skel[py + 1, px + 1] > 0) else 0
+    v4 = 1 if (py + 1 < H and skel[py + 1, px] > 0) else 0
+    v5 = 1 if (py + 1 < H and px > 0 and skel[py + 1, px - 1] > 0) else 0
+    v6 = 1 if (px > 0 and skel[py, px - 1] > 0) else 0
+    v7 = 1 if (py > 0 and px > 0 and skel[py - 1, px - 1] > 0) else 0
+
+    cn = 0
+    if v0 == 0 and v1 == 1: cn += 1
+    if v1 == 0 and v2 == 1: cn += 1
+    if v2 == 0 and v3 == 1: cn += 1
+    if v3 == 0 and v4 == 1: cn += 1
+    if v4 == 0 and v5 == 1: cn += 1
+    if v5 == 0 and v6 == 1: cn += 1
+    if v6 == 0 and v7 == 1: cn += 1
+    if v7 == 0 and v0 == 1: cn += 1
+    return cn
+
+
+@numba.njit(cache=True)
+def _prune_spurs_pass_numba(skel: np.ndarray, min_spur_length: int) -> bool:
+    """
+    Numba-compiled single pass of endpoint spur pruning on a binary skeleton.
+    Scans in exact row-major order, walks branches towards junctions, and clears
+    spurs shorter than or equal to min_spur_length.
+    """
+    H, W = skel.shape
+    # NEIGHBORS_8 order: (-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)
+    dy_arr = np.array([-1, -1, -1, 0, 0, 1, 1, 1], dtype=np.int32)
+    dx_arr = np.array([-1, 0, 1, -1, 1, -1, 0, 1], dtype=np.int32)
+
+    # 1. Collect all endpoints (skel > 0 and 8-neighbor sum == 1) in row-major order
+    ep_count = 0
+    for y in range(H):
+        for x in range(W):
+            if skel[y, x] > 0:
+                deg = 0
+                for d in range(8):
+                    ny = y + dy_arr[d]
+                    nx = x + dx_arr[d]
+                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0:
+                        deg += 1
+                if deg == 1:
+                    ep_count += 1
+
+    if ep_count == 0:
+        return False
+
+    ep_y = np.empty(ep_count, dtype=np.int32)
+    ep_x = np.empty(ep_count, dtype=np.int32)
+    idx = 0
+    for y in range(H):
+        for x in range(W):
+            if skel[y, x] > 0:
+                deg = 0
+                for d in range(8):
+                    ny = y + dy_arr[d]
+                    nx = x + dx_arr[d]
+                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0:
+                        deg += 1
+                if deg == 1:
+                    ep_y[idx] = y
+                    ep_x[idx] = x
+                    idx += 1
+
+    removed_any = False
+    max_path_buf = min_spur_length + 2
+    path_y = np.empty(max_path_buf, dtype=np.int32)
+    path_x = np.empty(max_path_buf, dtype=np.int32)
+
+    for i in range(ep_count):
+        ey = ep_y[i]
+        ex = ep_x[i]
+        # In case this endpoint was already cleared by a previously pruned spur in this pass
+        if skel[ey, ex] == 0:
+            continue
+
+        path_y[0] = ey
+        path_x[0] = ex
+        path_len = 1
+
+        prev_y = -1
+        prev_x = -1
+        curr_y = ey
+        curr_x = ex
+        reached_junction = False
+
+        while True:
+            n_count = 0
+            nxt_y = -1
+            nxt_x = -1
+            for d in range(8):
+                ny = curr_y + dy_arr[d]
+                nx = curr_x + dx_arr[d]
+                if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0 and (ny != prev_y or nx != prev_x):
+                    n_count += 1
+                    nxt_y = ny
+                    nxt_x = nx
+
+            if n_count != 1:
+                reached_junction = (n_count >= 2) or (_crossing_number(skel, curr_y, curr_x) >= 3)
+                break
+
+            if _crossing_number(skel, nxt_y, nxt_x) >= 3:
+                reached_junction = True
+                break
+
+            if path_len < max_path_buf:
+                path_y[path_len] = nxt_y
+                path_x[path_len] = nxt_x
+                path_len += 1
+            else:
+                path_len += 1
+
+            prev_y = curr_y
+            prev_x = curr_x
+            curr_y = nxt_y
+            curr_x = nxt_x
+
+            if path_len > min_spur_length:
+                break
+
+        if reached_junction and path_len <= min_spur_length:
+            for p in range(path_len):
+                skel[path_y[p], path_x[p]] = 0
+            removed_any = True
+
+    return removed_any
+
+
 def prune_skeleton(
     groove_skeleton: np.ndarray,
     min_spur_length: int = 8,
@@ -88,56 +226,25 @@ def prune_skeleton(
     skel = remove_small_components(skel)
     H, W = skel.shape
 
-    def _crossing_number(py: int, px: int) -> int:
-        offsets = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
-        vals = []
-        for dy, dx in offsets:
-            ny, nx = py + dy, px + dx
-            if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0:
-                vals.append(1)
-            else:
-                vals.append(0)
-        vals.append(vals[0])
-        return sum(1 for i in range(8) if vals[i] == 0 and vals[i+1] == 1)
-
-    # Prune one endpoint branch at a time. The walk stops as soon as the current
-    # path reaches a junction, avoiding trunk nubs.
+    # Prune one endpoint branch at a time using Numba-compiled walking loop.
     for _ in range(max(H, W)):
-        deg = compute_skeleton_neighbor_degrees(skel)
-        endpoints = np.argwhere((skel > 0) & (deg == 1))
-        if len(endpoints) == 0:
-            break
-        removed_any = False
-        for ey, ex in endpoints:
-            path = [(int(ey), int(ex))]
-            prev = None
-            curr = (int(ey), int(ex))
-            reached_junction = False
-            while True:
-                neighbours = []
-                for dy, dx in NEIGHBORS_8:
-                    ny, nx = curr[0] + dy, curr[1] + dx
-                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] and (ny, nx) != prev:
-                        neighbours.append((ny, nx))
-                if len(neighbours) != 1:
-                    reached_junction = len(neighbours) >= 2 or _crossing_number(curr[0], curr[1]) >= 3
-                    break
-                nxt = neighbours[0]
-                if _crossing_number(nxt[0], nxt[1]) >= 3:
-                    reached_junction = True
-                    break
-                path.append(nxt)
-                prev, curr = curr, nxt
-                if len(path) > int(min_spur_length):
-                    break
-            if reached_junction and len(path) <= int(min_spur_length):
-                for py, px in path:
-                    skel[py, px] = 0
-                removed_any = True
+        removed_any = _prune_spurs_pass_numba(skel, int(min_spur_length))
         if not removed_any:
             break
         skel = remove_small_components(skel)
     return (skel * 255).astype(np.uint8)
+
+
+def _warmup_numba():
+    """Warms up numba njit functions at module import with dummy arrays to eliminate initial JIT latency."""
+    dummy = np.zeros((32, 32), dtype=np.uint8)
+    dummy[16, 8:24] = 1
+    dummy[8:24, 16] = 1
+    _crossing_number(dummy, 16, 16)
+    _prune_spurs_pass_numba(dummy, 4)
+
+
+_warmup_numba()
 
 
 def extract_minutiae_points(skel, max_points=250, max_search_radius=80):
