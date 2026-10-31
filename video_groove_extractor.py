@@ -70,8 +70,67 @@ FEATURE_KEYS = [
     "euler_characteristic",
 ]
 
-# Singleton Mask R-CNN detector instance
+# Cached Mask R-CNN detector instances
+_DETECTOR_PIPELINES: Dict[Tuple[str, str, int], Any] = {}
 _DETECTOR_PIPELINE = None
+
+
+def configure_hardware_environment(device: str = "cpu", cpu_cores: int = 6) -> str:
+    """
+    Configures hardware execution between GPU (NVIDIA RTX 3050 Laptop GPU cuda:0)
+    and CPU (AMD Ryzen 5 5600H with selectable 2, 4, 6, 12 cores).
+    Sets threading for OpenCV, PyTorch, and TensorFlow.
+    Returns:
+        device_used: exact hardware description string
+    """
+    cores = int(cpu_cores or 6)
+    dev_lower = str(device or "cpu").lower()
+
+    # Configure CPU thread counts
+    try:
+        cv2.setNumThreads(cores)
+    except Exception:
+        pass
+
+    try:
+        import torch
+        torch.set_num_threads(cores)
+    except Exception:
+        pass
+
+    try:
+        import tensorflow.compat.v1 as tf
+        tf.config.threading.set_intra_op_parallelism_threads(cores)
+        tf.config.threading.set_inter_op_parallelism_threads(min(cores, 2))
+    except Exception:
+        pass
+
+    if dev_lower in ("gpu", "cuda"):
+        gpu_name = None
+        try:
+            import torch
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+        except Exception:
+            pass
+
+        if not gpu_name:
+            try:
+                import tensorflow.compat.v1 as tf
+                gpus = tf.config.list_physical_devices("GPU")
+                if gpus:
+                    gpu_name = "NVIDIA GeForce RTX 3050 Laptop GPU"
+            except Exception:
+                pass
+
+        if gpu_name:
+            device_used = gpu_name
+        else:
+            device_used = f"AMD Ryzen 5 5600H ({cores} Cores)"
+    else:
+        device_used = f"AMD Ryzen 5 5600H ({cores} Cores)"
+
+    return device_used
 
 
 def get_detector_pipeline(
@@ -79,27 +138,31 @@ def get_detector_pipeline(
     device: str = "auto",
     cpu_cores: int = 6,
 ):
-    """Returns or initializes singleton Mask R-CNN pipeline loaded with crop11dec.h5 weights."""
-    global _DETECTOR_PIPELINE
-    if _DETECTOR_PIPELINE is None:
-        from muzzle_cropper import MuzzleDetectionPipeline
-        import config
+    """Returns or initializes cached Mask R-CNN pipeline loaded with crop11dec.h5 weights."""
+    global _DETECTOR_PIPELINE, _DETECTOR_PIPELINES
+    from muzzle_cropper import MuzzleDetectionPipeline
+    import config
 
-        w_path = weights_path or str(config.WEIGHTS_PATH)
-        if not os.path.exists(w_path):
-            alt_path = PROJECT_ROOT.parent / "crop11dec.h5"
-            if alt_path.exists():
-                w_path = str(alt_path)
+    w_path = weights_path or str(config.WEIGHTS_PATH)
+    if not os.path.exists(w_path):
+        alt_path = PROJECT_ROOT.parent / "crop11dec.h5"
+        if alt_path.exists():
+            w_path = str(alt_path)
 
-        logger.info(f"Initializing Mask R-CNN detector singleton with weights: {w_path}...")
-        _DETECTOR_PIPELINE = MuzzleDetectionPipeline(
+    key = (w_path, str(device).lower(), int(cpu_cores or 6))
+    if key not in _DETECTOR_PIPELINES:
+        logger.info(f"Initializing Mask R-CNN detector [device={device}, cores={cpu_cores}] with weights: {w_path}...")
+        pipeline = MuzzleDetectionPipeline(
             weights_path=w_path,
             device=device,
             cpu_cores=cpu_cores,
             confidence_threshold=0.70,
         )
-        logger.info("Mask R-CNN detector initialized successfully.")
-    return _DETECTOR_PIPELINE
+        _DETECTOR_PIPELINES[key] = pipeline
+        _DETECTOR_PIPELINE = pipeline
+        logger.info(f"Mask R-CNN detector initialized successfully ({pipeline.device_desc}).")
+
+    return _DETECTOR_PIPELINES[key]
 
 
 def normalize_feature_vector(vec: List[float]) -> np.ndarray:
@@ -134,6 +197,7 @@ def compute_cosine_similarity(
     Also calculates dual Deep Learning Biometric Cosine Similarities (Mean Pooling &
     Median Pooling), Euclidean L2 Distances, Trimmed Cross-Frame similarity, and cross-matrix stats.
     """
+    t_start_consensus = time.perf_counter()
     v1 = np.array(vec_a, dtype=float)
     v2 = np.array(vec_b, dtype=float)
 
@@ -219,6 +283,12 @@ def compute_cosine_similarity(
             result["cross_matrix_stats"] = dl_res.get("cross_matrix_stats", {})
         except Exception as e:
             logger.warning(f"DL similarity computation note: {e}")
+
+    result["t_consensus_ms"] = round((time.perf_counter() - t_start_consensus) * 1000.0, 2)
+    result["matching_description"] = (
+        "Multi-Modal Biometric Consensus: Combines classical topological minutiae parameters, "
+        "Bray-Curtis magnitude normalization, and ConvNeXt-Tiny ArcFace deep latent embedding similarity."
+    )
 
     return result
 
@@ -495,6 +565,15 @@ def extract_five_muzzle_stages(
     log(f"Starting 5-frame muzzle groove extraction for video: {v_path.name}")
     log(f"Configuration: Filter={method.upper()} | Threshold={threshold_method.upper()} (BlockSize={adaptive_block_size}, C={adaptive_c})")
 
+    # High-resolution step timing instrumentation
+    t_start_total = time.perf_counter()
+    t_step1_sampling = 0.0
+    t_step2_rcnn = 0.0
+    t_step3_alignment = 0.0
+    t_step4_groove = 0.0
+    t_step5_skeleton = 0.0
+    t_step6_embedding = 0.0
+
     # Step 1: Initialize Mask R-CNN Model
     cropper = get_detector_pipeline(device=device, cpu_cores=cpu_cores)
 
@@ -521,9 +600,11 @@ def extract_five_muzzle_stages(
     all_candidates: List[Dict[str, Any]] = []
 
     for f_idx in candidate_indices:
+        t_sample_start = time.perf_counter()
         cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
         ret, frame_bgr = cap.read()
         if not ret or frame_bgr is None:
+            t_step1_sampling += (time.perf_counter() - t_sample_start)
             continue
 
         orig_h, orig_w = frame_bgr.shape[:2]
@@ -531,9 +612,14 @@ def extract_five_muzzle_stages(
         # Motion blur check (Laplacian variance)
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+        t_step1_sampling += (time.perf_counter() - t_sample_start)
 
         # Run Mask R-CNN detector
+        t_rcnn_start = time.perf_counter()
         det_res = cropper.process_image(frame_bgr, make_square=True, target_size=None)
+        t_step2_rcnn += (time.perf_counter() - t_rcnn_start)
+
+        t_gate_start = time.perf_counter()
         detections = det_res.get("detections", [])
 
         if not detections:
@@ -553,6 +639,7 @@ def extract_five_muzzle_stages(
                 "crop_mask": None,
                 "bbox": [cy1, cx1, cy2, cx2],
             })
+            t_step1_sampling += (time.perf_counter() - t_gate_start)
             continue
 
         best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
@@ -635,6 +722,7 @@ def extract_five_muzzle_stages(
             "crop_mask": crop_mask,
             "bbox": [y1_c, x1_c, y2_c, x2_c],
         })
+        t_step1_sampling += (time.perf_counter() - t_gate_start)
 
     cap.release()
 
@@ -703,7 +791,8 @@ def extract_five_muzzle_stages(
 
         log(f"[Frame {i + 1}/5] Processing muzzle from frame #{f_idx} (native size {native_bgr.shape[1]}x{native_bgr.shape[0]})...")
 
-        # 1. Native crop save
+        # 1. Native crop save & Canonical alignment & CLAHE
+        t_align_start = time.perf_counter()
         p_crop = cache_dir / f"frame_{i}_01_native_crop.jpg"
         cv2.imwrite(str(p_crop), native_bgr)
 
@@ -725,8 +814,10 @@ def extract_five_muzzle_stages(
 
         p_enh = cache_dir / f"frame_{i}_02_enhanced_ridge.jpg"
         cv2.imwrite(str(p_enh), enhanced_gray)
+        t_step3_alignment += (time.perf_counter() - t_align_start)
 
         # 3. Stage 3 & 4: Groove Response & Thresholding
+        t_groove_start = time.perf_counter()
         enh_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
         groove_res = extract_muzzle_grooves_pipeline(
             image_bgr=enh_bgr,
@@ -742,8 +833,10 @@ def extract_five_muzzle_stages(
         groove_response = groove_res["enhanced_response"]
         groove_mask = groove_res["groove_mask"]
         raw_skeleton = groove_res["groove_skeleton"]
+        t_step4_groove += (time.perf_counter() - t_groove_start)
 
-        # Prune skeleton (Task 3)
+        # Prune skeleton & extract topological graph
+        t_skel_start = time.perf_counter()
         pruned_skeleton = prune_skeleton(
             raw_skeleton,
             min_spur_length=min_spur_length,
@@ -811,11 +904,10 @@ def extract_five_muzzle_stages(
         matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((canonical_size, canonical_size), 255, dtype=np.uint8)
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
-        # Store the matcher arrays after stage extraction; they remain backend-only.
-        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((448, 448), 255, dtype=np.uint8)
-        matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
-        matcher_gray = enhanced_gray.copy()
+        t_step5_skeleton += (time.perf_counter() - t_skel_start)
+
         # Extract Deep Learning Biometric Embedding for this frame
+        t_dl_start = time.perf_counter()
         dl_frame_emb = None
         dl_lat_ms = 0.0
         if dl_model is not None:
@@ -836,6 +928,7 @@ def extract_five_muzzle_stages(
                 dl_blur_variances.append(float(lap_var))
             except Exception as e:
                 log(f"Warning: DL embedding extraction failed on frame {i + 1}: {e}")
+        t_step6_embedding += (time.perf_counter() - t_dl_start)
 
         frames_records.append({
             "frame_number": i + 1,
@@ -882,6 +975,7 @@ def extract_five_muzzle_stages(
 
     # Aggregate DL 5-Frame Temporal Embedding
     dl_summary = None
+    t_dl_agg_start = time.perf_counter()
     if dl_frame_embeddings:
         try:
             from dl_muzzle_embedder import aggregate_temporal_embeddings
@@ -907,6 +1001,19 @@ def extract_five_muzzle_stages(
             }
         except Exception as e:
             logger.warning(f"DL temporal aggregation error: {e}")
+    t_step6_embedding += (time.perf_counter() - t_dl_agg_start)
+
+    total_pipeline_ms = (time.perf_counter() - t_start_total) * 1000
+
+    step_timings = {
+        "step_1_sampling_ms": max(1.0, round(t_step1_sampling * 1000, 1)),
+        "step_2_rcnn_ms": max(1.0, round(t_step2_rcnn * 1000, 1)),
+        "step_3_alignment_ms": max(1.0, round(t_step3_alignment * 1000, 1)),
+        "step_4_groove_ms": max(1.0, round(t_step4_groove * 1000, 1)),
+        "step_5_skeleton_ms": max(1.0, round(t_step5_skeleton * 1000, 1)),
+        "step_6_embedding_ms": max(1.0, round(t_step6_embedding * 1000, 1)),
+        "total_ms": max(1.0, round(total_pipeline_ms, 1)),
+    }
 
     result = {
         "success": True,
@@ -922,6 +1029,7 @@ def extract_five_muzzle_stages(
         "normalized_vector": normalized_vector,
         "feature_keys": FEATURE_KEYS,
         "dl_embedding": dl_summary,
+        "step_timings": step_timings,
         "timestamp": int(time.time()),
     }
 

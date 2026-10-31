@@ -114,7 +114,13 @@ class SpatialPyramidGeM(nn.Module):
         global_gem = F.adaptive_avg_pool2d(powered, (1, 1)).pow(1.0 / p_val).squeeze(-1).squeeze(-1)  # (B, C)
 
         # 3x3 Regional GeM
-        grid_gem = F.adaptive_avg_pool2d(powered, (3, 3)).pow(1.0 / p_val)  # (B, C, 3, 3)
+        # For 7x7 spatial feature maps (standard 224x224 input with ConvNeXt-Tiny / ResNet-50),
+        # F.avg_pool2d(kernel_size=3, stride=2) is numerically identical to F.adaptive_avg_pool2d((3, 3)),
+        # but exports cleanly to ONNX without requiring non-integer pooling strides.
+        if torch.onnx.is_in_onnx_export() or (powered.ndim == 4 and powered.shape[-2] == 7 and powered.shape[-1] == 7):
+            grid_gem = F.avg_pool2d(powered, kernel_size=3, stride=2).pow(1.0 / p_val)  # (B, C, 3, 3)
+        else:
+            grid_gem = F.adaptive_avg_pool2d(powered, (3, 3)).pow(1.0 / p_val)  # (B, C, 3, 3)
         grid_cells = grid_gem.permute(0, 2, 3, 1).contiguous().view(x.size(0), 9, -1)  # (B, 9, C)
 
         # Stack to 10 spatial cells: (B, 10, C) [0: global, 1..9: regional]

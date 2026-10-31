@@ -1806,12 +1806,146 @@ def _spatial_visualization(best, verdict, dev_threshold):
     return _spatial_base64.b64encode(encoded.tobytes()).decode("ascii") if ok else ""
 
 
+def _prepare_cached_frame(frame, params):
+    """Pre-extracts per-frame features once to avoid redundant detector calls in match_video_sets."""
+    gray = _spatial_gray(frame, params)
+    mask = _spatial_mask(frame, gray.shape, params)
+    skel = _spatial_skeleton(frame, mask)
+    mins = _spatial_minutiae(frame, skel, params)
+    method, kp, desc = _spatial_features(gray, mask, params)
+    patches = [_spatial_patch(gray, p["x"], p["y"]) for p in mins]
+    return {
+        "gray": gray,
+        "mask": mask,
+        "skel": skel,
+        "mins": mins,
+        "method": method,
+        "kp": kp,
+        "desc": desc,
+        "patches": patches,
+    }
+
+
+def _match_cached_pair(ca, cb, params):
+    """Matches a pair of frames using pre-extracted features."""
+    method_a = ca["method"]
+    method_b = cb["method"]
+    kp_a, desc_a = ca["kp"], ca["desc"]
+    kp_b, desc_b = cb["kp"], cb["desc"]
+    detector_name = method_a if method_a == method_b else "mixed"
+    res_a = {
+        "detector": detector_name, "inlier_count": 0, "inlier_ratio": 0.0,
+        "score": 0.0, "kp_a": kp_a, "kp_b": kp_b, "matches": [],
+        "inlier_mask": [], "transform_matrix": None
+    }
+    if desc_a is not None and desc_b is not None and len(desc_a) >= 2 and len(desc_b) >= 2:
+        norm = cv2.NORM_HAMMING if "orb" in (method_a, method_b) else cv2.NORM_L2
+        matcher = cv2.BFMatcher(norm)
+        try:
+            pairs = matcher.knnMatch(desc_a, desc_b, k=2)
+            good = [p[0] for p in pairs if len(p) == 2 and p[0].distance < float(params["sift_lowe_ratio"]) * p[1].distance]
+            res_a["matches"] = good
+            if len(good) >= 3:
+                pa = np.float32([kp_a[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+                pb = np.float32([kp_b[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+                transform, inliers_mask = cv2.estimateAffinePartial2D(
+                    pa, pb, method=cv2.RANSAC,
+                    ransacReprojThreshold=float(params["sift_ransac_reproj_thresh"]),
+                )
+                if transform is not None and inliers_mask is not None:
+                    scale = math.hypot(float(transform[0, 0]), float(transform[1, 0]))
+                    angle = math.degrees(math.atan2(float(transform[1, 0]), float(transform[0, 0])))
+                    if 0.65 <= scale <= 1.55 and abs(angle) <= 55.0:
+                        inlier_flags = inliers_mask.ravel().astype(bool)
+                        inlier_count = int(inlier_flags.sum())
+                        inlier_ratio = inlier_count / max(1, len(good))
+                        score = inlier_ratio * min(1.0, inlier_count / max(1, int(params["sift_min_inliers_full_weight"])))
+                        res_a.update({
+                            "inlier_count": inlier_count,
+                            "inlier_ratio": float(inlier_ratio),
+                            "score": float(np.clip(score, 0.0, 1.0)),
+                            "inlier_mask": inlier_flags.tolist(),
+                            "transform_matrix": transform,
+                        })
+        except cv2.error:
+            pass
+
+    # Method B: Minutiae patch matching
+    res_b = {"matched_count": 0, "matched_fraction": 0.0, "score": 0.0, "pairs": [], "transform_matrix": None}
+    points_a, points_b = ca["mins"], cb["mins"]
+    patches_a, patches_b = ca["patches"], cb["patches"]
+    if len(points_a) >= 2 and len(points_b) >= 2:
+        radius = float(params["minutiae_max_radius_px"])
+        max_angle = float(params["minutiae_max_angle_deg"])
+        min_corr = float(params["minutiae_min_patch_corr"])
+        choices = []
+        for i, a in enumerate(points_a):
+            pa = patches_a[i]
+            if pa is None:
+                continue
+            for j, b in enumerate(points_b):
+                if _spatial_angle_delta(a["angle"], b["angle"]) > max_angle:
+                    continue
+                if math.hypot(a["x"] - b["x"], a["y"] - b["y"]) > radius:
+                    continue
+                pb = patches_b[j]
+                if pb is None:
+                    continue
+                corr = float(np.sum(pa * pb))
+                if corr >= min_corr:
+                    choices.append((corr, i, j))
+        choices.sort(reverse=True)
+        candidate_pairs, used_a, used_b = [], set(), set()
+        for corr, i, j in choices:
+            if i not in used_a and j not in used_b:
+                candidate_pairs.append((i, j, corr))
+                used_a.add(i)
+                used_b.add(j)
+        if len(candidate_pairs) >= 3:
+            coords_a = np.float32([[points_a[i]["x"], points_a[i]["y"]] for i, _, _ in candidate_pairs]).reshape(-1, 1, 2)
+            coords_b = np.float32([[points_b[j]["x"], points_b[j]["y"]] for _, j, _ in candidate_pairs]).reshape(-1, 1, 2)
+            transform, inlier_mask = cv2.estimateAffinePartial2D(
+                coords_a, coords_b, method=cv2.RANSAC,
+                ransacReprojThreshold=float(params["minutiae_ransac_reproj_thresh"]),
+            )
+            if transform is not None and inlier_mask is not None:
+                flags = inlier_mask.ravel().astype(bool)
+                matched = int(flags.sum())
+                fraction = matched / max(1, min(len(points_a), len(points_b)))
+                res_b = {
+                    "matched_count": matched,
+                    "matched_fraction": float(np.clip(fraction, 0.0, 1.0)),
+                    "score": float(np.clip(fraction, 0.0, 1.0)),
+                    "pairs": [candidate_pairs[i] for i, ok in enumerate(flags) if ok],
+                    "transform_matrix": transform,
+                }
+
+    pair_score = float(np.clip(float(params["weight_sift"]) * res_a["score"] + float(params["weight_minutiae"]) * res_b["score"], 0.0, 1.0))
+    return {
+        "pair_score": pair_score,
+        "method_a_sift": {k: res_a[k] for k in ("detector", "inlier_count", "inlier_ratio", "score")},
+        "method_b_minutiae": {k: res_b[k] for k in ("matched_count", "matched_fraction", "score")},
+        "_method_a": res_a, "_method_b": res_b, "_gray_a": ca["gray"], "_gray_b": cb["gray"]
+    }
+
+
 def match_video_sets(frames_a, frames_b, params_path="config/matching_params.json",
-                     threshold_path="config/matching_threshold.json") -> Dict[str, Any]:
+                     threshold_path="config/matching_threshold.json",
+                     cpu_cores: Optional[int] = None) -> Dict[str, Any]:
+    t0 = time.perf_counter()
     params = _spatial_load_params(params_path)
     if not frames_a or not frames_b:
         raise ValueError("Both video frame sets must contain at least one frame.")
-    results = [match_frame_pair(a, b, params_path=params_path) for a in frames_a for b in frames_b]
+
+    import concurrent.futures
+    workers = min(cpu_cores, 8) if (cpu_cores is not None and cpu_cores > 0) else min(os.cpu_count() or 6, 8)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        cached_a = list(executor.map(lambda f: _prepare_cached_frame(f, params), frames_a))
+        cached_b = list(executor.map(lambda f: _prepare_cached_frame(f, params), frames_b))
+        pairs = [(ca, cb) for ca in cached_a for cb in cached_b]
+        results = list(executor.map(lambda p: _match_cached_pair(p[0], p[1], params), pairs))
+
     scores = [r["pair_score"] for r in results]
     best = results[int(np.argmax(scores))]
     best_score, median_score = float(max(scores)), float(np.median(scores))
@@ -1821,6 +1955,7 @@ def match_video_sets(frames_a, frames_b, params_path="config/matching_params.jso
     verdict = ("MATCH" if decision_score >= threshold else "NO_MATCH") if calibrated and threshold is not None else "UNCALIBRATED"
     dev_hint = "DEV_LIKELY_MATCH" if decision_score >= dev_threshold else "DEV_LIKELY_NO_MATCH"
     viz = _spatial_visualization(best, verdict if calibrated else dev_hint, dev_threshold)
+    t_matching_ms = round((time.perf_counter() - t0) * 1000.0, 2)
     return {
         "decision_score": round(decision_score, 5),
         "best_score": round(best_score, 5),
@@ -1834,6 +1969,7 @@ def match_video_sets(frames_a, frames_b, params_path="config/matching_params.jso
         "dev_provisional_threshold": dev_threshold,
         "match_viz_base64": viz,
         "pair_count": len(results),
+        "t_matching_ms": t_matching_ms,
         # Backward-compatibility aliases:
         "composite_score": round(decision_score, 5),
         "is_match": bool(verdict == "MATCH" or (not calibrated and decision_score >= dev_threshold)),

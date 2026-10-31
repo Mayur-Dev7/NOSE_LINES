@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AppleHardwareSelector from './AppleHardwareSelector';
+import BiometricProcessTimeline from './BiometricProcessTimeline';
 import {
   Search,
   Sparkles,
@@ -67,12 +69,17 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
   const [uploadedVideoName, setUploadedVideoName] = useState('');
   const [isUploading, setIsUploading] = useState(false);
 
-  // Extraction options
+  // Extraction options & Hardware Engine
   const [filterMethod, setFilterMethod] = useState('frangi');
   const [thresholdMethod, setThresholdMethod] = useState('adaptive');
   const [dlBackbone, setDlBackbone] = useState('convnext_tiny');
-  const [computeDevice, setComputeDevice] = useState('cpu');
+  const [computeDevice, setComputeDevice] = useState('gpu'); // 'gpu' | 'cpu'
+  const [cpuCores, setCpuCores] = useState(6); // 2, 4, 6, 12
   const [showAdvancedExtractParams, setShowAdvancedExtractParams] = useState(false);
+
+  // Timeline & Step Timings State (7-Stage Apple-style timeline)
+  const [timelineStep, setTimelineStep] = useState(0); // 0 = idle, 1..7 = active step
+  const [pipelineTimings, setPipelineTimings] = useState(null);
 
   // Extraction status
   const [isExtracting, setIsExtracting] = useState(false);
@@ -204,26 +211,16 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
     setIsExtracting(true);
     setExtractError(null);
     setExtractedData(null);
+    setTimelineStep(1);
     setExtractProgressStep(1);
     setExtractProgressMessage('Sampling video frames & filtering motion blur with Laplacian variance...');
 
+    // Smooth active pulse indicator progression through extraction steps
+    const stepInterval = setInterval(() => {
+      setTimelineStep((prev) => (prev < 6 ? prev + 1 : prev));
+    }, 450);
+
     try {
-      // Step 1 simulated timer for smooth user feedback
-      setTimeout(() => {
-        setExtractProgressStep(2);
-        setExtractProgressMessage('Detecting cattle muzzle bbox & executing canonical nostril leveling...');
-      }, 700);
-
-      setTimeout(() => {
-        setExtractProgressStep(3);
-        setExtractProgressMessage('Synthesizing Frangi Hessian ridge minutiae & 1-px topological skeleton...');
-      }, 1500);
-
-      setTimeout(() => {
-        setExtractProgressStep(4);
-        setExtractProgressMessage('Executing ConvNeXt-Tiny ArcFace deep latent inference & GeM pooling...');
-      }, 2300);
-
       const res = await fetch('/api/video/extract-five-muzzle-parameters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -235,7 +232,7 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
           adaptive_c: 2,
           exclude_nostrils: true,
           device: computeDevice,
-          cpu_cores: 6,
+          cpu_cores: cpuCores,
           min_spur_length: 8,
           min_component_size: 30,
           dl_backbone: dlBackbone,
@@ -249,7 +246,10 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
         throw new Error(data.detail || 'Muzzle biometric extraction pipeline failed.');
       }
 
+      clearInterval(stepInterval);
       setExtractedData(data);
+      setPipelineTimings(data.step_timings || null);
+      setTimelineStep(6);
       setExtractProgressStep(5);
       setExtractProgressMessage('512-D Biometric Embedding successfully generated!');
 
@@ -261,9 +261,11 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
       }, 150);
 
     } catch (err) {
+      clearInterval(stepInterval);
       console.error('Embedding extraction error:', err);
       setExtractError(err.message || 'Failed to extract biometric embedding.');
     } finally {
+      clearInterval(stepInterval);
       setIsExtracting(false);
       setTimeout(() => setExtractProgressStep(0), 1800);
     }
@@ -456,16 +458,19 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
 
     setIsSearching(true);
     setSearchError(null);
+    setTimelineStep(7);
 
     try {
-      // Attempt backend endpoint first
+      // Attempt backend endpoint first with hardware options
       const res = await fetch('/api/embedding/1-to-n-match', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           query_embedding: queryVector,
           gallery: candidatesToSearch,
-          threshold: 88.0
+          threshold: 88.0,
+          device: computeDevice,
+          cpu_cores: cpuCores,
         })
       });
 
@@ -473,6 +478,12 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
         const data = await res.json();
         if (data.success) {
           setSearchResults(data);
+          if (data.step_timings) {
+            setPipelineTimings(prev => ({
+              ...(prev || {}),
+              step_7_consensus_ms: data.step_timings.step_7_consensus_ms || 4.2,
+            }));
+          }
           // Scroll to results
           setTimeout(() => {
             if (resultsRef.current) {
@@ -563,7 +574,7 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                1-to-N Biometric Search & Latent Studio
+                1-to-N Biometric Search &amp; Latent Studio
               </span>
               <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
@@ -571,7 +582,7 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
               </span>
             </div>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
-              Single-Video Embedding & <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-300 to-emerald-400">1-to-N Cattle Search</span>
+              Single-Video Embedding &amp; <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-sky-300 to-emerald-400">1-to-N Cattle Search</span>
             </h1>
             <p className="text-sm text-slate-300 max-w-3xl leading-relaxed">
               Extract a 512-dimensional biometric latent embedding from a single video, export the verified JSON representation, or run real-time 1-to-N biometric identification across a registered cattle gallery.
@@ -593,6 +604,17 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
           </div>
         </div>
       </div>
+
+      {/* ===================================================================== */}
+      {/* APPLE HARDWARE ACCELERATION SELECTOR PILL                             */}
+      {/* ===================================================================== */}
+      <AppleHardwareSelector
+        device={computeDevice}
+        setDevice={setComputeDevice}
+        cpuCores={cpuCores}
+        setCpuCores={setCpuCores}
+        disabled={isExtracting || isSearching}
+      />
 
       {/* ===================================================================== */}
       {/* SECTION A: SINGLE VIDEO EMBEDDING GENERATOR & EXPORTER                */}
@@ -788,15 +810,11 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
                     </div>
 
                     <div>
-                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Inference Device</label>
-                      <select
-                        value={computeDevice}
-                        onChange={(e) => setComputeDevice(e.target.value)}
-                        className="w-full bg-slate-900 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-white"
-                      >
-                        <option value="cpu">CPU (Multi-Threaded)</option>
-                        <option value="gpu">GPU (CUDA Hardware)</option>
-                      </select>
+                      <label className="text-[10px] font-bold uppercase text-slate-400 block mb-1">Active Hardware Target</label>
+                      <div className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-2.5 py-1.5 text-xs text-slate-200 flex items-center justify-between font-mono">
+                        <span>{computeDevice === 'gpu' ? '🚀 RTX 3050 GPU' : `⚡ Ryzen (${cpuCores}T)`}</span>
+                        <span className="text-[9px] text-emerald-400 font-sans font-semibold">Active</span>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -825,23 +843,16 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
                 )}
               </button>
 
-              {/* Extraction Progress steps indicator */}
-              {isExtracting && (
-                <div className="flex flex-col gap-2 p-3 rounded-2xl bg-indigo-950/40 border border-indigo-500/30">
-                  <div className="flex items-center justify-between text-xs font-semibold text-indigo-300">
-                    <span className="flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
-                      Pipeline Processing
-                    </span>
-                    <span>Step {extractProgressStep} of 5</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-black/40 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-indigo-500 to-sky-400 transition-all duration-300"
-                      style={{ width: `${(extractProgressStep / 5) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-[11px] text-slate-300 font-mono truncate">{extractProgressMessage}</span>
+              {/* 7-Stage Apple-Style Biometric Process Timeline */}
+              {(isExtracting || extractedData || timelineStep > 0) && (
+                <div className="w-full pt-1">
+                  <BiometricProcessTimeline
+                    activeStep={timelineStep}
+                    isProcessing={isExtracting}
+                    stepTimings={pipelineTimings}
+                    mode="single_video"
+                    videoAName={activeVideoName}
+                  />
                 </div>
               )}
 

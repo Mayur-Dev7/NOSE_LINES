@@ -1126,6 +1126,8 @@ class CosineSimilarityRequest(BaseModel):
     dl_median_b: Optional[List[float]] = None
     per_frames_a: Optional[List[List[float]]] = None
     per_frames_b: Optional[List[List[float]]] = None
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
 
 
 @app.post("/api/video/cosine-similarity")
@@ -1137,6 +1139,7 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
     Embeddings (ConvNeXt-Tiny / ResNet-50 Spatial GeM & ArcFace).
     Supports dual embeddings (mean and median pooling) with full backward compatibility.
     """
+    t0 = time.perf_counter()
     try:
         res = compute_cosine_similarity(
             vec_a=req.vector_a,
@@ -1150,6 +1153,11 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
             dl_median_a=req.dl_median_a,
             dl_median_b=req.dl_median_b,
         )
+        t_sim_ms = (time.perf_counter() - t0) * 1000
+        res["step_timings"] = {
+            "step_7_consensus_ms": max(0.5, round(t_sim_ms, 1)),
+            "total_ms": max(0.5, round(t_sim_ms, 1)),
+        }
         return res
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cosine similarity calculation failed: {exc}")
@@ -1376,6 +1384,8 @@ class OneToNMatchRequest(BaseModel):
     gallery: Optional[List[Dict[str, Any]]] = None
     similarity_metric: Optional[str] = "cosine"  # "cosine" or "l2"
     threshold: Optional[float] = 88.0
+    device: Optional[str] = "cpu"
+    cpu_cores: Optional[int] = 6
 
 
 @app.post("/api/embedding/1-to-n-match")
@@ -1386,6 +1396,7 @@ async def one_to_n_match_endpoint(req: OneToNMatchRequest):
     Vectorized NumPy dot-product computation, Euclidean L2 distance,
     biometric thresholding verdicts, runner-up margin, and candidate ranking.
     """
+    t_match_0 = time.perf_counter()
     if not req.query_embedding or len(req.query_embedding) == 0:
         raise HTTPException(status_code=400, detail="query_embedding cannot be empty.")
 
@@ -1519,6 +1530,10 @@ async def one_to_n_match_endpoint(req: OneToNMatchRequest):
         "verdict_is_match": is_confirmed,
         "verdict_color": "emerald" if is_confirmed else "rose",
         "threshold": threshold,
+        "step_timings": {
+            "step_7_consensus_ms": max(0.5, round((time.perf_counter() - t_match_0) * 1000, 1)),
+            "total_ms": max(0.5, round((time.perf_counter() - t_match_0) * 1000, 1)),
+        },
     }
 
 
