@@ -22,9 +22,47 @@ import shutil
 import asyncio
 import functools
 import subprocess
+import collections
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Any, Dict, Union
 import logging
+
+# Preload NVIDIA CUDA 11 runtime libraries into global process space so TensorFlow finds GPU:0
+try:
+    import ctypes
+    site_packages = os.path.join(os.path.dirname(__file__), ".venv", "lib", "python3.8", "site-packages")
+    for so_file in sorted(glob.glob(os.path.join(site_packages, "nvidia", "*", "lib", "*.so*"))):
+        try:
+            ctypes.CDLL(so_file, mode=ctypes.RTLD_GLOBAL)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+# Live in-memory telemetry log buffer for UI streaming
+_PIPELINE_LOGS = collections.deque(maxlen=300)
+
+class PipelineLogHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            _PIPELINE_LOGS.append({
+                "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                "level": record.levelname,
+                "message": record.getMessage(),
+                "logger": record.name,
+            })
+        except Exception:
+            pass
+
+_pipeline_handler = PipelineLogHandler()
+_pipeline_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+logging.getLogger().addHandler(_pipeline_handler)
+logging.getLogger("video_groove_extractor").addHandler(_pipeline_handler)
+logging.getLogger("muzzle_cropper").addHandler(_pipeline_handler)
+logging.getLogger("dl_muzzle_embedder").addHandler(_pipeline_handler)
+logging.getLogger("muzzle_matcher").addHandler(_pipeline_handler)
+logging.getLogger("server").addHandler(_pipeline_handler)
 
 logger = logging.getLogger("server")
 
@@ -98,6 +136,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/logs/recent")
+async def get_recent_pipeline_logs(limit: int = 150):
+    """Returns recent structured log entries for the live UI telemetry drawer."""
+    logs = list(_PIPELINE_LOGS)
+    return {"logs": logs[-limit:] if limit > 0 else logs}
+
+
+@app.post("/api/logs/clear")
+async def clear_pipeline_logs():
+    """Clears live telemetry buffer at the beginning of a fresh verification session."""
+    _PIPELINE_LOGS.clear()
+    return {"status": "cleared"}
 
 
 @app.get("/api/status")

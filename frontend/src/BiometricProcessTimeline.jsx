@@ -104,6 +104,8 @@ export default function BiometricProcessTimeline({
   stepTimings = null, // Backend payload: { step_1_sampling_ms, step_2_rcnn_ms, ... }
   stepTimingsA = null, // Video A timings if 2-video mode
   stepTimingsB = null, // Video B timings if 2-video mode
+  realWallClockSec = null, // True measured wall-clock seconds
+  stopwatchSec = null, // Live running stopwatch seconds
   mode = 'two_video', // 'two_video' | 'single_video'
   videoAName = 'Video A',
   videoBName = 'Video B',
@@ -111,6 +113,24 @@ export default function BiometricProcessTimeline({
 }) {
   const [expandedStep, setExpandedStep] = useState(null);
   const [timingViewMode, setTimingViewMode] = useState('combined'); // 'combined' | 'videoA' | 'videoB'
+
+  const ALIAS_MAP = {
+    step_1_sampling_ms: 't_sampling_ms',
+    step_2_rcnn_ms: 't_detector_ms',
+    step_3_alignment_ms: 't_canonical_clahe_ms',
+    step_4_groove_ms: 't_groove_extract_ms',
+    step_5_skeleton_ms: 't_skeleton_minutiae_ms',
+    step_6_embedding_ms: 't_dl_inference_ms',
+    step_7_consensus_ms: 't_consensus_ms',
+  };
+
+  const readVal = (obj, key) => {
+    if (!obj) return null;
+    if (typeof obj[key] === 'number') return obj[key];
+    const alias = ALIAS_MAP[key];
+    if (alias && typeof obj[alias] === 'number') return obj[alias];
+    return null;
+  };
 
   // Determine which timing source to read from
   const getTimingForStep = (stepObj) => {
@@ -121,26 +141,24 @@ export default function BiometricProcessTimeline({
       source = stepTimingsB;
     }
 
-    if (source && typeof source[stepObj.timingKey] === 'number') {
-      return source[stepObj.timingKey];
-    }
+    const direct = readVal(source, stepObj.timingKey);
+    if (direct !== null) return direct;
 
     // If combined mode and we have both A and B, sum them for steps 1-6
     if (timingViewMode === 'combined' && stepTimingsA && stepTimingsB && stepObj.step <= 6) {
-      const valA = stepTimingsA[stepObj.timingKey] || 0;
-      const valB = stepTimingsB[stepObj.timingKey] || 0;
+      const valA = readVal(stepTimingsA, stepObj.timingKey) || 0;
+      const valB = readVal(stepTimingsB, stepObj.timingKey) || 0;
       if (valA > 0 || valB > 0) {
         return Number((valA + valB).toFixed(1));
       }
     }
 
     // Fallback to stepTimings or null
-    if (stepTimings && typeof stepTimings[stepObj.timingKey] === 'number') {
-      return stepTimings[stepObj.timingKey];
-    }
-    
-    // Fallback default realistic latency if completed
-    return stepObj.defaultLatencyMs;
+    const fallbackVal = readVal(stepTimings, stepObj.timingKey);
+    if (fallbackVal !== null) return fallbackVal;
+
+    // Only return default realistic latency if completed and backend omitted it
+    return isCompleted ? stepObj.defaultLatencyMs : 0;
   };
 
   const isCompleted = !isProcessing && (activeStep >= 7 || stepTimings !== null);
@@ -237,16 +255,35 @@ export default function BiometricProcessTimeline({
           </div>
         )}
 
-        {/* Total Latency Pill */}
-        {isCompleted && (
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-emerald-500/30 text-xs font-mono shadow-inner">
-            <Zap className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="text-slate-400 font-sans text-[11px]">Total Pipeline Latency:</span>
-            <strong className="text-emerald-300 font-bold">
-              {totalDurationMs >= 1000 ? `${(totalDurationMs / 1000).toFixed(2)}s` : `${totalDurationMs} ms`}
-            </strong>
-          </div>
-        )}
+        {/* Latency / Elapsed Time Indicators */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {isProcessing && stopwatchSec > 0 && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/30 text-xs font-mono shadow-inner animate-pulse">
+              <Clock className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-slate-400 font-sans text-[11px]">Elapsed:</span>
+              <strong className="text-cyan-300 font-bold">{stopwatchSec}s</strong>
+            </div>
+          )}
+
+          {isCompleted && (
+            <>
+              {realWallClockSec > 0 && (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/30 text-xs font-mono shadow-inner">
+                  <Clock className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="text-slate-400 font-sans text-[11px]">Wall-Clock Time:</span>
+                  <strong className="text-cyan-300 font-bold">{realWallClockSec}s</strong>
+                </div>
+              )}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-emerald-500/30 text-xs font-mono shadow-inner">
+                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-slate-400 font-sans text-[11px]">Engine Sum:</span>
+                <strong className="text-emerald-300 font-bold">
+                  {totalDurationMs >= 1000 ? `${(totalDurationMs / 1000).toFixed(2)}s` : `${totalDurationMs} ms`}
+                </strong>
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
       {/* 7-Step Timeline List */}

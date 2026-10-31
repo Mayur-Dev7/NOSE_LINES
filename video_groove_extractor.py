@@ -84,24 +84,37 @@ def configure_hardware_environment(device: str = "cpu", cpu_cores: int = 6) -> s
         device_used: exact hardware description string
     """
     cores = int(cpu_cores or 6)
+    eff_cores = min(cores, 6)
     dev_lower = str(device or "cpu").lower()
 
-    # Configure CPU thread counts
+    # Preload NVIDIA CUDA 11 runtime into global process space
     try:
-        cv2.setNumThreads(cores)
+        import ctypes, glob
+        site_packages = os.path.join(os.path.dirname(__file__), ".venv", "lib", "python3.8", "site-packages")
+        for so_file in sorted(glob.glob(os.path.join(site_packages, "nvidia", "*", "lib", "*.so*"))):
+            try:
+                ctypes.CDLL(so_file, mode=ctypes.RTLD_GLOBAL)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Configure CPU thread counts (capped to physical cores to avoid hyperthread thrashing)
+    try:
+        cv2.setNumThreads(eff_cores)
     except Exception:
         pass
 
     try:
         import torch
-        torch.set_num_threads(cores)
+        torch.set_num_threads(eff_cores)
     except Exception:
         pass
 
     try:
         import tensorflow.compat.v1 as tf
-        tf.config.threading.set_intra_op_parallelism_threads(cores)
-        tf.config.threading.set_inter_op_parallelism_threads(min(cores, 2))
+        tf.config.threading.set_intra_op_parallelism_threads(eff_cores)
+        tf.config.threading.set_inter_op_parallelism_threads(min(eff_cores, 2))
     except Exception:
         pass
 
@@ -284,7 +297,12 @@ def compute_cosine_similarity(
         except Exception as e:
             logger.warning(f"DL similarity computation note: {e}")
 
-    result["t_consensus_ms"] = round((time.perf_counter() - t_start_consensus) * 1000.0, 2)
+    t_consensus_val = round((time.perf_counter() - t_start_consensus) * 1000.0, 2)
+    result["t_consensus_ms"] = t_consensus_val
+    result["step_timings"] = {
+        "step_7_consensus_ms": t_consensus_val,
+        "t_consensus_ms": t_consensus_val,
+    }
     result["matching_description"] = (
         "Multi-Modal Biometric Consensus: Combines classical topological minutiae parameters, "
         "Bray-Curtis magnitude normalization, and ConvNeXt-Tiny ArcFace deep latent embedding similarity."
@@ -753,12 +771,12 @@ def extract_five_muzzle_stages(
         }
         all_candidates.append(cand_record)
 
-        # Early exit: once 5 good high-confidence (conf >= 0.90) temporally separated frames are obtained
-        if passed_gating and conf >= 0.90:
+        # Early exit: once 5 high-confidence (conf >= 0.75) temporally separated frames are obtained
+        if passed_gating and conf >= 0.75:
             if all(abs(f_idx - v["frame_idx"]) >= min_temporal_sep for v in valid_candidates):
                 valid_candidates.append(cand_record)
                 if len(valid_candidates) >= top_k_frames:
-                    log(f"Early exit: Obtained {len(valid_candidates)} high-confidence (conf >= 0.90) temporally separated frames.")
+                    log(f"Early exit: Obtained {len(valid_candidates)} high-confidence (conf >= 0.75) temporally separated frames in {len(all_candidates)} evaluations.")
                     break
 
     # Select top 5 chronologically ordered frames

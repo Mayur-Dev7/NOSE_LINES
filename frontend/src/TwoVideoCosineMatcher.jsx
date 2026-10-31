@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import AppleHardwareSelector from './AppleHardwareSelector';
 import BiometricProcessTimeline from './BiometricProcessTimeline';
+import LiveTelemetryLogs from './LiveTelemetryLogs';
 import {
   ScanLine,
   GitCompare,
@@ -78,6 +79,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const [stepTimingsA, setStepTimingsA] = useState(null);
   const [stepTimingsB, setStepTimingsB] = useState(null);
   const [combinedStepTimings, setCombinedStepTimings] = useState(null);
+  const [realWallClockSec, setRealWallClockSec] = useState(0);
+  const [stopwatchSec, setStopwatchSec] = useState(0);
 
   // Primary metric driver: 'mean' (Outlier-Pruned Mean) or 'median' (5-Frame Median)
   const [primaryMetric, setPrimaryMetric] = useState('mean');
@@ -181,6 +184,17 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     setMatchResult(null);
     setTimelineStep(1);
 
+    const startWallClock = performance.now();
+    setStopwatchSec(0);
+    setRealWallClockSec(0);
+    const timerInterval = setInterval(() => {
+      setStopwatchSec(Number(((performance.now() - startWallClock) / 1000).toFixed(1)));
+    }, 100);
+
+    try {
+      await fetch('/api/logs/clear', { method: 'POST' });
+    } catch (_) {}
+
     const extractionConfig = {
       method: 'frangi',
       threshold_method: 'adaptive',
@@ -195,15 +209,11 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       cpu_cores: cpuCores,
     };
 
-    // Smooth active pulse indicator progression through extraction steps
-    const stepInterval = setInterval(() => {
-      setTimelineStep((prev) => (prev < 6 ? prev + 1 : prev));
-    }, 450);
-
     try {
       // Step 1: Video A extraction
+      setTimelineStep(1);
       setProgressStep(1);
-      setProgressMessage('Analyzing Video A (Reference): extracting 5 temporal muzzle frames & ConvNeXt embeddings...');
+      setProgressMessage('Analyzing Video A (Reference): extracting 5 temporal muzzle frames & 512-D ConvNeXt embeddings...');
       const resA = await fetch('/api/video/extract-five-muzzle-parameters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -220,8 +230,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       setStepTimingsA(extractedA.step_timings || null);
 
       // Step 2: Video B extraction
+      setTimelineStep(4);
       setProgressStep(2);
-      setProgressMessage('Analyzing Video B (Query Candidate): extracting 5 temporal muzzle frames & ConvNeXt embeddings...');
+      setProgressMessage('Analyzing Video B (Query Candidate): extracting 5 temporal muzzle frames & 512-D ConvNeXt embeddings...');
       const resB = await fetch('/api/video/extract-five-muzzle-parameters', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -238,10 +249,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       setStepTimingsB(extractedB.step_timings || null);
 
       // Step 3: Biometric Cosine Match & Verdict
-      clearInterval(stepInterval);
       setTimelineStep(7);
       setProgressStep(3);
-      setProgressMessage('Computing biometric consensus: 5-frame ArcFace GeM embeddings & graph minutiae...');
+      setProgressMessage('Computing biometric consensus: 512-D ArcFace GeM embeddings & graph minutiae (Step 7)...');
       const vecA = extractedA.vector_array || Object.values(extractedA.median_parameters);
       const vecB = extractedB.vector_array || Object.values(extractedB.median_parameters);
       const dlEmbA = extractedA.dl_embedding?.median_embedding || null;
@@ -265,19 +275,31 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       });
       const simData = await resSim.json();
 
+      clearInterval(timerInterval);
+      const wallClockElapsed = Number(((performance.now() - startWallClock) / 1000).toFixed(2));
+      setStopwatchSec(wallClockElapsed);
+      setRealWallClockSec(wallClockElapsed);
+
       // Assemble exact latency breakdown from backend step_timings payloads
       const timingsA = extractedA.step_timings || null;
       const timingsB = extractedB.step_timings || null;
       const timingsSim = simData.step_timings || null;
 
+      const getVal = (obj, key1, key2, def = 0) => {
+        if (!obj) return def;
+        if (typeof obj[key1] === 'number') return obj[key1];
+        if (typeof obj[key2] === 'number') return obj[key2];
+        return def;
+      };
+
       const combined = {
-        step_1_sampling_ms: Number(((timingsA?.step_1_sampling_ms || 142.4) + (timingsB?.step_1_sampling_ms || 138.1)).toFixed(1)),
-        step_2_rcnn_ms: Number(((timingsA?.step_2_rcnn_ms || 310.2) + (timingsB?.step_2_rcnn_ms || 298.5)).toFixed(1)),
-        step_3_alignment_ms: Number(((timingsA?.step_3_alignment_ms || 86.5) + (timingsB?.step_3_alignment_ms || 82.3)).toFixed(1)),
-        step_4_groove_ms: Number(((timingsA?.step_4_groove_ms || 54.8) + (timingsB?.step_4_groove_ms || 51.6)).toFixed(1)),
-        step_5_skeleton_ms: Number(((timingsA?.step_5_skeleton_ms || 32.1) + (timingsB?.step_5_skeleton_ms || 29.8)).toFixed(1)),
-        step_6_embedding_ms: Number(((timingsA?.step_6_embedding_ms || 22.4) + (timingsB?.step_6_embedding_ms || 21.2)).toFixed(1)),
-        step_7_consensus_ms: Number((timingsSim?.step_7_consensus_ms || 4.2).toFixed(1)),
+        step_1_sampling_ms: Number((getVal(timingsA, 'step_1_sampling_ms', 't_sampling_ms') + getVal(timingsB, 'step_1_sampling_ms', 't_sampling_ms')).toFixed(1)),
+        step_2_rcnn_ms: Number((getVal(timingsA, 'step_2_rcnn_ms', 't_detector_ms') + getVal(timingsB, 'step_2_rcnn_ms', 't_detector_ms')).toFixed(1)),
+        step_3_alignment_ms: Number((getVal(timingsA, 'step_3_alignment_ms', 't_canonical_clahe_ms') + getVal(timingsB, 'step_3_alignment_ms', 't_canonical_clahe_ms')).toFixed(1)),
+        step_4_groove_ms: Number((getVal(timingsA, 'step_4_groove_ms', 't_groove_extract_ms') + getVal(timingsB, 'step_4_groove_ms', 't_groove_extract_ms')).toFixed(1)),
+        step_5_skeleton_ms: Number((getVal(timingsA, 'step_5_skeleton_ms', 't_skeleton_minutiae_ms') + getVal(timingsB, 'step_5_skeleton_ms', 't_skeleton_minutiae_ms')).toFixed(1)),
+        step_6_embedding_ms: Number((getVal(timingsA, 'step_6_embedding_ms', 't_dl_inference_ms') + getVal(timingsB, 'step_6_embedding_ms', 't_dl_inference_ms')).toFixed(1)),
+        step_7_consensus_ms: Number((getVal(timingsSim, 'step_7_consensus_ms', 't_consensus_ms', simData.t_consensus_ms || 4.2)).toFixed(1)),
       };
       setCombinedStepTimings(combined);
 
@@ -300,11 +322,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       }, 120);
 
     } catch (err) {
-      clearInterval(stepInterval);
       console.error('Verification pipeline error:', err);
       setErrorMessage(err.message || 'Verification failed. Please check video files.');
     } finally {
-      clearInterval(stepInterval);
       setProcessing(false);
       setProgressStep(0);
     }
@@ -680,16 +700,25 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
         {/* 7-Stage Apple-Style Biometric Timeline & Process Details */}
         {(processing || matchResult || timelineStep > 0) && (
-          <div className="w-full">
+          <div className="w-full flex flex-col gap-4">
             <BiometricProcessTimeline
               activeStep={timelineStep}
               isProcessing={processing}
               stepTimings={combinedStepTimings}
               stepTimingsA={stepTimingsA}
               stepTimingsB={stepTimingsB}
+              realWallClockSec={realWallClockSec}
+              stopwatchSec={stopwatchSec}
               mode="two_video"
               videoAName={videoA.split('/').pop()}
               videoBName={videoB.split('/').pop()}
+            />
+
+            {/* Real-time Hardware Telemetry & Execution Logs */}
+            <LiveTelemetryLogs
+              isProcessing={processing}
+              elapsedSeconds={stopwatchSec}
+              device={computeDevice}
             />
           </div>
         )}
