@@ -567,17 +567,12 @@ def extract_five_muzzle_stages(
 
     # High-resolution step timing instrumentation
     t_start_total = time.perf_counter()
-    t_step1_sampling = 0.0
-    t_step2_rcnn = 0.0
-    t_step3_alignment = 0.0
-    t_step4_groove = 0.0
-    t_step5_skeleton = 0.0
-    t_step6_embedding = 0.0
+    device_used = configure_hardware_environment(device=device, cpu_cores=cpu_cores)
+    log(f"Active hardware profile: {device_used} (device='{device}', cores={cpu_cores})")
 
-    # Step 1: Initialize Mask R-CNN Model
-    cropper = get_detector_pipeline(device=device, cpu_cores=cpu_cores)
+    # Step 1: Video stream parsing & Laplacian sharpness gating
+    t_sampling_start = time.perf_counter()
 
-    # Step 2: Open video and calculate temporal candidate frames
     cap = cv2.VideoCapture(str(v_path))
     if not cap.isOpened():
         raise RuntimeError(f"Unable to open video: {v_path}")
@@ -591,35 +586,74 @@ def extract_five_muzzle_stages(
         cap.release()
         raise RuntimeError(f"Video contains 0 frames: {v_path}")
 
-    # Sample ~30 candidate frames evenly distributed across video duration
+    # Sample candidate indices evenly distributed across video duration
     num_samples = min(num_candidate_frames, total_frames)
     candidate_indices = np.linspace(0, total_frames - 1, num_samples, dtype=int).tolist()
     candidate_indices = sorted(list(dict.fromkeys(candidate_indices)))
     log(f"Sampling {len(candidate_indices)} candidate frames across video duration for quality gating...")
 
-    all_candidates: List[Dict[str, Any]] = []
-
+    raw_candidates: List[Dict[str, Any]] = []
     for f_idx in candidate_indices:
-        t_sample_start = time.perf_counter()
         cap.set(cv2.CAP_PROP_POS_FRAMES, f_idx)
         ret, frame_bgr = cap.read()
         if not ret or frame_bgr is None:
-            t_step1_sampling += (time.perf_counter() - t_sample_start)
             continue
-
-        orig_h, orig_w = frame_bgr.shape[:2]
-
-        # Motion blur check (Laplacian variance)
         gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
         lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-        t_step1_sampling += (time.perf_counter() - t_sample_start)
+        raw_candidates.append({
+            "frame_idx": f_idx,
+            "timestamp_sec": round(float(f_idx / fps), 2),
+            "laplacian_var": lap_var,
+            "frame_bgr": frame_bgr,
+            "gray": gray,
+        })
+    cap.release()
 
-        # Run Mask R-CNN detector
-        t_rcnn_start = time.perf_counter()
+    if not raw_candidates:
+        raise RuntimeError(f"No readable video frames could be sampled from: {v_path}")
+
+    # Laplacian Pre-Screening: skip blurry frames (lap_var < 25.0) from expensive Mask R-CNN detector!
+    sharp_pool = [c for c in raw_candidates if c["laplacian_var"] >= 25.0]
+    if len(sharp_pool) < top_k_frames:
+        sharp_pool = sorted(raw_candidates, key=lambda c: c["laplacian_var"], reverse=True)[:max(top_k_frames, 10)]
+
+    # Select the sharpest ~8-10 candidate frames spread across video duration
+    num_buckets = min(len(sharp_pool), 10)
+    sorted_by_time = sorted(sharp_pool, key=lambda c: c["frame_idx"])
+    chunks = np.array_split(sorted_by_time, num_buckets)
+    detector_candidates: List[Dict[str, Any]] = []
+    for chunk in chunks:
+        if len(chunk) > 0:
+            best_in_chunk = max(chunk, key=lambda c: c["laplacian_var"])
+            detector_candidates.append(best_in_chunk)
+
+    if len(detector_candidates) < 8:
+        picked_indices = {c["frame_idx"] for c in detector_candidates}
+        remaining = [c for c in sharp_pool if c["frame_idx"] not in picked_indices]
+        remaining.sort(key=lambda c: c["laplacian_var"], reverse=True)
+        detector_candidates.extend(remaining[:(10 - len(detector_candidates))])
+
+    # Evaluate sharpest candidates first
+    detector_candidates.sort(key=lambda c: c["laplacian_var"], reverse=True)
+    t_sampling_ms = (time.perf_counter() - t_sampling_start) * 1000.0
+    log(f"Laplacian pre-screening selected {len(detector_candidates)} sharp candidates (lap_var >= 25.0) for Mask R-CNN.")
+
+    # Step 2: Mask R-CNN Muzzle Localization with early exit
+    t_detector_start = time.perf_counter()
+    cropper = get_detector_pipeline(device=device, cpu_cores=cpu_cores)
+
+    all_candidates: List[Dict[str, Any]] = []
+    valid_candidates: List[Dict[str, Any]] = []
+    min_temporal_sep = max(3, int(total_frames / 20))
+
+    for cand in detector_candidates:
+        frame_bgr = cand["frame_bgr"]
+        gray = cand["gray"]
+        lap_var = cand["laplacian_var"]
+        f_idx = cand["frame_idx"]
+        orig_h, orig_w = frame_bgr.shape[:2]
+
         det_res = cropper.process_image(frame_bgr, make_square=True, target_size=None)
-        t_step2_rcnn += (time.perf_counter() - t_rcnn_start)
-
-        t_gate_start = time.perf_counter()
         detections = det_res.get("detections", [])
 
         if not detections:
@@ -629,7 +663,7 @@ def extract_five_muzzle_stages(
             score = min(100.0, lap_var / 5.0)
             all_candidates.append({
                 "frame_idx": f_idx,
-                "timestamp_sec": round(float(f_idx / fps), 2),
+                "timestamp_sec": cand["timestamp_sec"],
                 "confidence": 0.0,
                 "laplacian_var": lap_var,
                 "score": score,
@@ -639,13 +673,12 @@ def extract_five_muzzle_stages(
                 "crop_mask": None,
                 "bbox": [cy1, cx1, cy2, cx2],
             })
-            t_step1_sampling += (time.perf_counter() - t_gate_start)
             continue
 
         best_det = max(detections, key=lambda d: d.get("confidence", 0.0))
         conf = float(best_det.get("confidence", 0.0))
 
-        # Measure sharpness inside the eroded muzzle mask to reduce background influence.
+        # Sharpness inside eroded muzzle mask to reduce background influence
         full_mask_for_quality = best_det.get("mask")
         if full_mask_for_quality is not None and np.asarray(full_mask_for_quality).size:
             quality_mask = np.asarray(full_mask_for_quality)
@@ -667,10 +700,6 @@ def extract_five_muzzle_stages(
                 if laplacian_values.size:
                     lap_var = float(np.var(laplacian_values))
 
-        # Quality gating checks:
-        # 1. Low confidence (< 0.70)
-        # 2. Motion blur (< 25.0)
-        # 3. Partial muzzle (bbox margin < 5px if large, or mask area / bbox area < 0.25)
         passed_gating = True
         reasons = []
 
@@ -710,9 +739,9 @@ def extract_five_muzzle_stages(
         if full_mask is not None and full_mask.shape[0] >= y2_c and full_mask.shape[1] >= x2_c:
             crop_mask = (full_mask[y1_c:y2_c, x1_c:x2_c].astype(np.uint8) * 255) if (y2_c > y1_c and x2_c > x1_c) else None
 
-        all_candidates.append({
+        cand_record = {
             "frame_idx": f_idx,
-            "timestamp_sec": round(float(f_idx / fps), 2),
+            "timestamp_sec": cand["timestamp_sec"],
             "confidence": conf,
             "laplacian_var": lap_var,
             "score": score,
@@ -721,47 +750,50 @@ def extract_five_muzzle_stages(
             "native_crop": native_crop,
             "crop_mask": crop_mask,
             "bbox": [y1_c, x1_c, y2_c, x2_c],
-        })
-        t_step1_sampling += (time.perf_counter() - t_gate_start)
+        }
+        all_candidates.append(cand_record)
 
-    cap.release()
+        # Early exit: once 5 good high-confidence (conf >= 0.90) temporally separated frames are obtained
+        if passed_gating and conf >= 0.90:
+            if all(abs(f_idx - v["frame_idx"]) >= min_temporal_sep for v in valid_candidates):
+                valid_candidates.append(cand_record)
+                if len(valid_candidates) >= top_k_frames:
+                    log(f"Early exit: Obtained {len(valid_candidates)} high-confidence (conf >= 0.90) temporally separated frames.")
+                    break
 
-    # Step 3: Select top 5 highest-scoring distinct frames across video with temporal spread
-    valid_candidates = [c for c in all_candidates if c["passed_gating"]]
-    valid_candidates.sort(key=lambda c: c["score"], reverse=True)
+    # Select top 5 chronologically ordered frames
+    if len(valid_candidates) >= top_k_frames:
+        detected_candidates = sorted(valid_candidates[:top_k_frames], key=lambda c: c["frame_idx"])
+    else:
+        # Fallback to best available frames from evaluated pool
+        val_cands = [c for c in all_candidates if c["passed_gating"]]
+        val_cands.sort(key=lambda c: c["score"], reverse=True)
+        fb_cands = [c for c in all_candidates if not c["passed_gating"]]
+        fb_cands.sort(key=lambda c: c["score"], reverse=True)
 
-    fallback_candidates = [c for c in all_candidates if not c["passed_gating"]]
-    fallback_candidates.sort(key=lambda c: c["score"], reverse=True)
+        selected: List[Dict[str, Any]] = []
 
-    selected: List[Dict[str, Any]] = []
+        def try_select(pool: List[Dict[str, Any]], min_sep: int, current: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            res = list(current)
+            for c_cand in pool:
+                if len(res) >= top_k_frames:
+                    break
+                if all(abs(c_cand["frame_idx"] - s["frame_idx"]) >= min_sep for s in res):
+                    res.append(c_cand)
+            return res
 
-    def try_select(pool: List[Dict[str, Any]], min_sep: int, current: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        res = list(current)
-        for cand in pool:
-            if len(res) >= top_k_frames:
+        for sep in (min_temporal_sep, 10, 5, 1):
+            selected = try_select(val_cands, sep, selected)
+            if len(selected) >= top_k_frames:
                 break
-            if all(abs(cand["frame_idx"] - s["frame_idx"]) >= min_sep for s in res):
-                res.append(cand)
-        return res
+        if len(selected) < top_k_frames:
+            for sep in (min_temporal_sep, 10, 5, 1):
+                selected = try_select(fb_cands, sep, selected)
+                if len(selected) >= top_k_frames:
+                    break
+        detected_candidates = sorted(selected[:top_k_frames], key=lambda c: c["frame_idx"])
 
-    # Attempt to pick with separation 15, then 10, then 5, then 1 from valid candidates
-    for sep in (15, 10, 5, 1):
-        selected = try_select(valid_candidates, sep, selected)
-        if len(selected) >= 5:
-            break
-
-    # Gracefully fall back to best available candidate frames if fewer than 5 passed gating
-    if len(selected) < 5:
-        log(f"Only {len(selected)} valid frames passed strict gating; gracefully falling back to best available candidate frames.")
-        for sep in (15, 10, 5, 1):
-            selected = try_select(fallback_candidates, sep, selected)
-            if len(selected) >= 5:
-                break
-
-    # Sort selected frames chronologically
-    selected.sort(key=lambda c: c["frame_idx"])
-    detected_candidates = selected[:top_k_frames]
-
+    t_detector_ms = (time.perf_counter() - t_detector_start) * 1000.0
     log(f"Selected {len(detected_candidates)} frames for groove extraction: {[c['frame_idx'] for c in detected_candidates]}")
 
     # Deep learning embedder initialization
@@ -772,13 +804,23 @@ def extract_five_muzzle_stages(
     dl_blur_variances: List[float] = []
     if enable_dl_embedding:
         try:
-            from dl_muzzle_embedder import get_muzzle_embedder, extract_frame_embedding, aggregate_temporal_embeddings
+            from dl_muzzle_embedder import get_muzzle_embedder
             dl_model = get_muzzle_embedder(backbone=dl_backbone, device=device)
             log(f"Deep learning embedder active: backbone={dl_backbone} ({dl_model.weights_mode}) | input_mode='{dl_input_mode}'")
         except Exception as e:
             log(f"Warning: Could not initialize deep learning embedder: {e}")
 
-    # Step 4: Process the 5 frames through canonical alignment, 2x Lanczos-4, CLAHE grayscale, groove filter, threshold, and skeleton pruning
+    # Asynchronous disk write executor for fast image persistence
+    import concurrent.futures
+    disk_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(cpu_cores, 6))
+    disk_futures = []
+
+    # Step timings accumulators
+    t_canonical_clahe_ms = 0.0
+    t_groove_extract_ms = 0.0
+    t_skeleton_minutiae_ms = 0.0
+    t_dl_inference_ms = 0.0
+
     frames_records = []
     param_lists: Dict[str, List[float]] = {k: [] for k in FEATURE_KEYS}
 
@@ -791,12 +833,8 @@ def extract_five_muzzle_stages(
 
         log(f"[Frame {i + 1}/5] Processing muzzle from frame #{f_idx} (native size {native_bgr.shape[1]}x{native_bgr.shape[0]})...")
 
-        # 1. Native crop save & Canonical alignment & CLAHE
+        # Step 3: Canonical Alignment & CLAHE local contrast normalization
         t_align_start = time.perf_counter()
-        p_crop = cache_dir / f"frame_{i}_01_native_crop.jpg"
-        cv2.imwrite(str(p_crop), native_bgr)
-
-        # 2. Canonical alignment & 2x Lanczos-4 target sizing (448x448)
         aligned_bgr, aligned_mask, align_meta = canonical_align_muzzle(
             native_bgr, mask=crop_mask, target_size=canonical_size
         )
@@ -805,18 +843,14 @@ def extract_five_muzzle_stages(
         upscaled_bgr = aligned_bgr
         mask_up = aligned_mask
 
-        # Grayscale & CLAHE local contrast normalization on canonical aligned crop
         gray_up = cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2GRAY)
         blurred = cv2.GaussianBlur(gray_up, (0, 0), sigmaX=1.5, sigmaY=1.5)
         gray_unsharp = cv2.addWeighted(gray_up, 1.5, blurred, -0.5, 0)
         clahe_filter = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
         enhanced_gray = clahe_filter.apply(gray_unsharp)
+        t_canonical_clahe_ms += (time.perf_counter() - t_align_start) * 1000.0
 
-        p_enh = cache_dir / f"frame_{i}_02_enhanced_ridge.jpg"
-        cv2.imwrite(str(p_enh), enhanced_gray)
-        t_step3_alignment += (time.perf_counter() - t_align_start)
-
-        # 3. Stage 3 & 4: Groove Response & Thresholding
+        # Step 4: Multi-scale Black-Hat / Frangi groove filtering & adaptive threshold
         t_groove_start = time.perf_counter()
         enh_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
         groove_res = extract_muzzle_grooves_pipeline(
@@ -833,9 +867,9 @@ def extract_five_muzzle_stages(
         groove_response = groove_res["enhanced_response"]
         groove_mask = groove_res["groove_mask"]
         raw_skeleton = groove_res["groove_skeleton"]
-        t_step4_groove += (time.perf_counter() - t_groove_start)
+        t_groove_extract_ms += (time.perf_counter() - t_groove_start) * 1000.0
 
-        # Prune skeleton & extract topological graph
+        # Step 5: Thin skeletonization, graph topology & minutiae extraction
         t_skel_start = time.perf_counter()
         pruned_skeleton = prune_skeleton(
             raw_skeleton,
@@ -843,29 +877,14 @@ def extract_five_muzzle_stages(
             min_component_size=min_component_size,
         )
 
-        # 4. Stage 5: Line Coordinates & Minutiae Parameters Extraction
         graph_res = extract_skeleton_graph(
             pruned_skeleton,
             mask=groove_res.get("mask"),
             prune=False,  # Already pruned
         )
         desc = graph_res["descriptors"]
-
-        # 5. Visual Colored Groove Overlay
         overlay = visualize_groove_graph(upscaled_bgr, graph_res)
 
-        # Save stage artifacts to disk
-        p_resp = cache_dir / f"frame_{i}_03_groove_response.png"
-        p_mask = cache_dir / f"frame_{i}_04_groove_mask.png"
-        p_skel = cache_dir / f"frame_{i}_05_thin_skeleton.png"
-        p_over = cache_dir / f"frame_{i}_overlay.png"
-
-        cv2.imwrite(str(p_resp), groove_response)
-        cv2.imwrite(str(p_mask), groove_mask)
-        cv2.imwrite(str(p_skel), pruned_skeleton)
-        cv2.imwrite(str(p_over), overlay)
-
-        # Assemble the 10 numerical minutiae parameters from the pruned skeleton
         params = {
             "groove_pixels": int(groove_res["num_groove_pixels"]),
             "skeleton_pixels": int(desc["skeleton_pixel_count"]),
@@ -883,7 +902,6 @@ def extract_five_muzzle_stages(
             pruned_skeleton,
             max_points=int(matcher_params.get("max_minutiae_points", 250)),
         )
-        # Keep the legacy orientation key while exposing angle/weight for spatial matching.
         minutiae = [
             {
                 "x": float(point["x"]),
@@ -895,18 +913,32 @@ def extract_five_muzzle_stages(
             }
             for point in ranked_minutiae
         ]
+        t_skeleton_minutiae_ms += (time.perf_counter() - t_skel_start) * 1000.0
+
+        # Fast background image persistence to avoid disk I/O bottleneck
+        p_crop = cache_dir / f"frame_{i}_01_native_crop.jpg"
+        p_enh = cache_dir / f"frame_{i}_02_enhanced_ridge.jpg"
+        p_resp = cache_dir / f"frame_{i}_03_groove_response.png"
+        p_mask = cache_dir / f"frame_{i}_04_groove_mask.png"
+        p_skel = cache_dir / f"frame_{i}_05_thin_skeleton.png"
+        p_over = cache_dir / f"frame_{i}_overlay.png"
+
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_crop), native_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85]))
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_enh), enhanced_gray, [cv2.IMWRITE_JPEG_QUALITY, 85]))
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_resp), groove_response, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_mask), groove_mask, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_skel), pruned_skeleton, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
+        disk_futures.append(disk_executor.submit(cv2.imwrite, str(p_over), overlay, [cv2.IMWRITE_PNG_COMPRESSION, 1]))
 
         for k in FEATURE_KEYS:
             param_lists[k].append(params[k])
 
         rel_base = f"/output/video_five_frames/{cache_dir.name}"
-        # Backend-only spatial feature arrays are held by the server's LRU cache.
         matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((canonical_size, canonical_size), 255, dtype=np.uint8)
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
-        t_step5_skeleton += (time.perf_counter() - t_skel_start)
 
-        # Extract Deep Learning Biometric Embedding for this frame
+        # Step 6: ConvNeXt-Tiny ArcFace 512-D spatial GeM latent inference
         t_dl_start = time.perf_counter()
         dl_frame_emb = None
         dl_lat_ms = 0.0
@@ -928,7 +960,7 @@ def extract_five_muzzle_stages(
                 dl_blur_variances.append(float(lap_var))
             except Exception as e:
                 log(f"Warning: DL embedding extraction failed on frame {i + 1}: {e}")
-        t_step6_embedding += (time.perf_counter() - t_dl_start)
+        t_dl_inference_ms += (time.perf_counter() - t_dl_start) * 1000.0
 
         frames_records.append({
             "frame_number": i + 1,
@@ -960,6 +992,14 @@ def extract_five_muzzle_stages(
             "dl_inference_ms": dl_lat_ms,
         })
         log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae" + (f" | DL {dl_lat_ms:.1f}ms" if dl_lat_ms > 0 else ""))
+
+    # Ensure all background disk writes are complete
+    for fut in disk_futures:
+        try:
+            fut.result()
+        except Exception:
+            pass
+    disk_executor.shutdown(wait=False)
 
     # Aggregate median parameter vector across the 5 frames
     median_params: Dict[str, float] = {}
@@ -1001,18 +1041,38 @@ def extract_five_muzzle_stages(
             }
         except Exception as e:
             logger.warning(f"DL temporal aggregation error: {e}")
-    t_step6_embedding += (time.perf_counter() - t_dl_agg_start)
+    t_dl_inference_ms += (time.perf_counter() - t_dl_agg_start) * 1000.0
 
-    total_pipeline_ms = (time.perf_counter() - t_start_total) * 1000
+    t_total_ms = (time.perf_counter() - t_start_total) * 1000.0
 
+    # Step timings dictionary with exact requested keys and backward compatibility
     step_timings = {
-        "step_1_sampling_ms": max(1.0, round(t_step1_sampling * 1000, 1)),
-        "step_2_rcnn_ms": max(1.0, round(t_step2_rcnn * 1000, 1)),
-        "step_3_alignment_ms": max(1.0, round(t_step3_alignment * 1000, 1)),
-        "step_4_groove_ms": max(1.0, round(t_step4_groove * 1000, 1)),
-        "step_5_skeleton_ms": max(1.0, round(t_step5_skeleton * 1000, 1)),
-        "step_6_embedding_ms": max(1.0, round(t_step6_embedding * 1000, 1)),
-        "total_ms": max(1.0, round(total_pipeline_ms, 1)),
+        "t_sampling_ms": round(float(t_sampling_ms), 2),
+        "t_detector_ms": round(float(t_detector_ms), 2),
+        "t_canonical_clahe_ms": round(float(t_canonical_clahe_ms), 2),
+        "t_groove_extract_ms": round(float(t_groove_extract_ms), 2),
+        "t_skeleton_minutiae_ms": round(float(t_skeleton_minutiae_ms), 2),
+        "t_dl_inference_ms": round(float(t_dl_inference_ms), 2),
+        "t_total_ms": round(float(t_total_ms), 2),
+        "device_used": device_used,
+        # Backward-compatibility aliases:
+        "step_1_sampling_ms": round(float(t_sampling_ms), 2),
+        "step_2_rcnn_ms": round(float(t_detector_ms), 2),
+        "step_3_alignment_ms": round(float(t_canonical_clahe_ms), 2),
+        "step_4_groove_ms": round(float(t_groove_extract_ms), 2),
+        "step_5_skeleton_ms": round(float(t_skeleton_minutiae_ms), 2),
+        "step_6_embedding_ms": round(float(t_dl_inference_ms), 2),
+        "total_ms": round(float(t_total_ms), 2),
+    }
+
+    # Step descriptions with exact requested text
+    step_descriptions = {
+        "step_1": "Frame Sampling & Sharpness Gating: Evaluates motion blur variance across video duration to select the highest-fidelity cattle muzzle candidate frames.",
+        "step_2": "Deep Mask R-CNN Muzzle Localization: Isolates the cattle muzzle dermal perimeter using ResNet-101 anchors and applies 5% margin padding with square aspect expansion.",
+        "step_3": "Canonical Alignment & CLAHE Enhancement: Standardizes resolution to 448x448 canonical size, aligns nostril horizontality, and applies Contrast Limited Adaptive Histogram Equalization.",
+        "step_4": "Dermatoglyphic Groove Filtering: Isolates micro-dermatoglyphic valley structures from background skin pigmentation and binarizes via adaptive Gaussian thresholding.",
+        "step_5": "Topological Skeletonization & Minutiae: Thins ridges to 1-pixel centerlines, constructs topological graph minutiae, and measures branch densities.",
+        "step_6": "512-D Deep Latent Biometric Embedding: Projects composite 3-channel ridge tensor into unit hypersphere latent space via ConvNeXt-Tiny and SpatialPyramidGeM (10 regions).",
     }
 
     result = {
@@ -1030,6 +1090,7 @@ def extract_five_muzzle_stages(
         "feature_keys": FEATURE_KEYS,
         "dl_embedding": dl_summary,
         "step_timings": step_timings,
+        "step_descriptions": step_descriptions,
         "timestamp": int(time.time()),
     }
 

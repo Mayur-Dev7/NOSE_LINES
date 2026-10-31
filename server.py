@@ -1154,10 +1154,11 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
             dl_median_b=req.dl_median_b,
         )
         t_sim_ms = (time.perf_counter() - t0) * 1000
-        res["step_timings"] = {
-            "step_7_consensus_ms": max(0.5, round(t_sim_ms, 1)),
-            "total_ms": max(0.5, round(t_sim_ms, 1)),
-        }
+        if "step_timings" not in res or not isinstance(res["step_timings"], dict):
+            res["step_timings"] = {}
+        res["step_timings"]["step_7_consensus_ms"] = max(0.5, round(t_sim_ms, 1))
+        res["step_timings"]["t_consensus_ms"] = res.get("t_consensus_ms", max(0.5, round(t_sim_ms, 1)))
+        res["step_timings"]["total_ms"] = max(0.5, round(t_sim_ms, 1))
         return res
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Cosine similarity calculation failed: {exc}")
@@ -1775,7 +1776,8 @@ async def match_video_endpoint(req: VideoMatchRequest):
         if not frame_sets[0] or not frame_sets[1]:
             raise HTTPException(status_code=422, detail="One or both videos produced no usable frames.")
 
-        result = await asyncio.to_thread(match_spatial_video_sets, frame_sets[0], frame_sets[1])
+        cores = int(req.cpu_cores or 6)
+        result = await asyncio.to_thread(match_spatial_video_sets, frame_sets[0], frame_sets[1], cpu_cores=cores)
         # The matcher has already converted its visualization to base64. Never serialize ndarrays.
         return result
     except HTTPException:

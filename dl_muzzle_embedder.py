@@ -566,6 +566,8 @@ def extract_frame_embedding(
     if device is None:
         device = next(model.parameters()).device
     else:
+        if str(device).lower() == "gpu":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
         device = torch.device(device)
 
     # Time end-to-end preprocessing + inference
