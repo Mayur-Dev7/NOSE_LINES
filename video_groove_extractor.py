@@ -836,6 +836,10 @@ def extract_five_muzzle_stages(
 
     # Asynchronous disk write executor for fast image persistence
     import concurrent.futures
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
     disk_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(cpu_cores, 6))
     disk_futures = []
 

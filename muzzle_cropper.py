@@ -133,6 +133,12 @@ def configure_hardware(device: str = "auto", cpu_cores: Optional[int] = None, lo
         except Exception:
             pass
 
+        try:
+            import torch
+            torch.set_num_threads(eff_cores)
+        except Exception:
+            pass
+
         if logger:
             logger.info(f"[Hardware] CPU thread count optimized to: {eff_cores} worker threads (avoids hyperthread thrashing)")
             pass
@@ -269,6 +275,23 @@ class MuzzleDetectionPipeline:
         else:
             self.logger.info(f"[Optimization] CPU Engine active: 640x640 resolution, 50 ROIs (Optimized for {cpu_cores or 'all'} cores, ~180ms)")
 
+        eff_cores = min(cpu_cores, 6) if (cpu_cores and cpu_cores > 0) else 6
+        inter_cores = min(eff_cores, 2)
+        import tensorflow.compat.v1 as tf
+        self.graph = tf.get_default_graph()
+        tf_config = tf.ConfigProto(
+            intra_op_parallelism_threads=eff_cores,
+            inter_op_parallelism_threads=inter_cores,
+        )
+        if not is_gpu:
+            tf_config.device_count["GPU"] = 0
+        try:
+            self.session = tf.Session(config=tf_config, graph=self.graph)
+            tf.keras.backend.set_session(self.session)
+        except Exception:
+            self.session = tf.keras.backend.get_session()
+        self.lock = threading.Lock()
+
         t0 = time.perf_counter()
         self.logger.info(f"Loading Mask R-CNN inference model with weights from: {self.weights_path}...")
         self.model = modellib.MaskRCNN(
@@ -279,15 +302,6 @@ class MuzzleDetectionPipeline:
         self.model.load_weights(self.weights_path, by_name=True)
         t_load = (time.perf_counter() - t0) * 1000
         self.logger.info(f"Model successfully loaded and initialized in {t_load:.1f} ms")
-
-        # Retain graph & session for thread-safe cross-thread execution
-        import tensorflow.compat.v1 as tf
-        self.graph = tf.get_default_graph()
-        try:
-            self.session = tf.keras.backend.get_session()
-        except Exception:
-            self.session = tf.Session(graph=self.graph)
-        self.lock = threading.Lock()
 
     def process_image(
         self,
