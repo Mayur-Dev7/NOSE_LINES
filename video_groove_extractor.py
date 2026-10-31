@@ -822,6 +822,7 @@ def extract_five_muzzle_stages(
     # Deep learning embedder initialization
     dl_model = None
     dl_frame_embeddings: List[np.ndarray] = []
+    dl_frame_tensors: List[np.ndarray] = []
     dl_latencies: List[float] = []
     dl_confidences: List[float] = []
     dl_blur_variances: List[float] = []
@@ -967,7 +968,16 @@ def extract_five_muzzle_stages(
         dl_lat_ms = 0.0
         if dl_model is not None:
             try:
-                from dl_muzzle_embedder import extract_frame_embedding
+                from dl_muzzle_embedder import extract_frame_embedding, prepare_input_tensor
+                raw_t = prepare_input_tensor(
+                    clahe_gray=matcher_gray,
+                    groove_response=groove_response,
+                    skeleton=pruned_skeleton,
+                    mask=matcher_mask,
+                    input_mode=dl_input_mode,
+                    device="cpu",
+                )
+                dl_frame_tensors.append(raw_t.squeeze(0).cpu().numpy())
                 dl_frame_emb, dl_lat_ms = extract_frame_embedding(
                     model=dl_model,
                     clahe_gray=matcher_gray,
@@ -989,6 +999,7 @@ def extract_five_muzzle_stages(
             "frame_number": i + 1,
             "frame_idx": f_idx,
             "timestamp_sec": candidate["timestamp_sec"],
+            "bbox": candidate.get("bbox", []),
             "confidence": round(float(conf), 3),
             "laplacian_var": round(float(lap_var), 2),
             "canonical_angle_deg": round(float(angle_deg), 2),
@@ -1112,6 +1123,7 @@ def extract_five_muzzle_stages(
         "normalized_vector": normalized_vector,
         "feature_keys": FEATURE_KEYS,
         "dl_embedding": dl_summary,
+        "dl_tensors": dl_frame_tensors,
         "step_timings": step_timings,
         "step_descriptions": step_descriptions,
         "timestamp": int(time.time()),
@@ -1120,6 +1132,7 @@ def extract_five_muzzle_stages(
     # Matcher-only NumPy arrays stay in memory for the API cache and are never
     # written to JSON files or exposed in HTTP JSON responses.
     summary_payload = dict(result)
+    summary_payload.pop("dl_tensors", None)
     summary_payload["frames"] = [
         {key: value for key, value in frame.items() if not isinstance(value, np.ndarray)}
         for frame in frames_records

@@ -1,0 +1,10 @@
+{
+  "cosine_similarity": 96.31,
+  "raw_cosine_similarity": 99.9,
+  "magnitude_penalty_factor": 0.964,
+  "dl_similarity_pct": 60.1,
+  "mean_pooling_similarity_pct": 60.1,
+  "median_pooling_similarity_pct": 60.1,
+  "is_match": true,
+  "verdict": "MATCH (Confirmed Same Cattle)"
+}

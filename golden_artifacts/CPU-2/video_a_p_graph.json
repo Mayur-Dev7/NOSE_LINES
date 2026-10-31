@@ -1,0 +1,12 @@
+{
+  "groove_pixels": 28748.0,
+  "skeleton_pixels": 6441.0,
+  "groove_coverage_pct": 26.38,
+  "endpoints": 206.0,
+  "junctions": 268.0,
+  "connected_components": 64.0,
+  "mean_branch_length": 13.56,
+  "cycles": 172.0,
+  "density": 0.032,
+  "euler_characteristic": -109.0
+}

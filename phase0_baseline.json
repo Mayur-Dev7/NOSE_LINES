@@ -1,0 +1,218 @@
+{
+  "GPU": {
+    "profile": "GPU",
+    "device": "gpu",
+    "cpu_cores": 6,
+    "runs": [
+      {
+        "step_1_sampling_ms": 1963.87,
+        "step_2_detector_ms": 2730.37,
+        "step_3_alignment_ms": 236.24,
+        "step_4_groove_ms": 3758.98,
+        "step_5_skeleton_ms": 3201.04,
+        "step_6_embedding_ms": 135.95,
+        "step_7_consensus_ms": 0.91,
+        "total_wall_clock_s": 12.09,
+        "video_a_wall_ms": 5994.86,
+        "video_b_wall_ms": 6096.44
+      },
+      {
+        "step_1_sampling_ms": 1983.41,
+        "step_2_detector_ms": 2720.36,
+        "step_3_alignment_ms": 233.28,
+        "step_4_groove_ms": 3774.29,
+        "step_5_skeleton_ms": 3000.29,
+        "step_6_embedding_ms": 133.53,
+        "step_7_consensus_ms": 1.03,
+        "total_wall_clock_s": 11.92,
+        "video_a_wall_ms": 5801.85,
+        "video_b_wall_ms": 6112.69
+      },
+      {
+        "step_1_sampling_ms": 2036.17,
+        "step_2_detector_ms": 2685.7,
+        "step_3_alignment_ms": 245.7,
+        "step_4_groove_ms": 3765.73,
+        "step_5_skeleton_ms": 3024.02,
+        "step_6_embedding_ms": 135.0,
+        "step_7_consensus_ms": 0.94,
+        "total_wall_clock_s": 11.96,
+        "video_a_wall_ms": 5906.79,
+        "video_b_wall_ms": 6053.47
+      }
+    ],
+    "median": {
+      "step_1_sampling_ms": 1983.41,
+      "step_2_detector_ms": 2720.36,
+      "step_3_alignment_ms": 236.24,
+      "step_4_groove_ms": 3765.73,
+      "step_5_skeleton_ms": 3024.02,
+      "step_6_embedding_ms": 135.0,
+      "step_7_consensus_ms": 0.94,
+      "total_wall_clock_s": 11.96
+    },
+    "mean": {
+      "step_1_sampling_ms": 1994.48,
+      "step_2_detector_ms": 2712.14,
+      "step_3_alignment_ms": 238.41,
+      "step_4_groove_ms": 3766.33,
+      "step_5_skeleton_ms": 3075.12,
+      "step_6_embedding_ms": 134.83,
+      "step_7_consensus_ms": 0.96,
+      "total_wall_clock_s": 11.99
+    },
+    "share_pct": {
+      "step_1_sampling_ms": 16.7,
+      "step_2_detector_ms": 22.9,
+      "step_3_alignment_ms": 2.0,
+      "step_4_groove_ms": 31.7,
+      "step_5_skeleton_ms": 25.5,
+      "step_6_embedding_ms": 1.1,
+      "step_7_consensus_ms": 0.0
+    }
+  },
+  "CPU-6": {
+    "profile": "CPU-6",
+    "device": "cpu",
+    "cpu_cores": 6,
+    "runs": [
+      {
+        "step_1_sampling_ms": 2046.85,
+        "step_2_detector_ms": 2657.4,
+        "step_3_alignment_ms": 247.64,
+        "step_4_groove_ms": 3725.35,
+        "step_5_skeleton_ms": 3004.48,
+        "step_6_embedding_ms": 565.14,
+        "step_7_consensus_ms": 0.95,
+        "total_wall_clock_s": 12.31,
+        "video_a_wall_ms": 5951.55,
+        "video_b_wall_ms": 6362.06
+      },
+      {
+        "step_1_sampling_ms": 1953.28,
+        "step_2_detector_ms": 2650.27,
+        "step_3_alignment_ms": 245.81,
+        "step_4_groove_ms": 3778.23,
+        "step_5_skeleton_ms": 3265.1,
+        "step_6_embedding_ms": 638.75,
+        "step_7_consensus_ms": 0.96,
+        "total_wall_clock_s": 12.6,
+        "video_a_wall_ms": 6004.5,
+        "video_b_wall_ms": 6594.08
+      },
+      {
+        "step_1_sampling_ms": 2032.94,
+        "step_2_detector_ms": 2675.94,
+        "step_3_alignment_ms": 258.79,
+        "step_4_groove_ms": 3895.96,
+        "step_5_skeleton_ms": 3148.68,
+        "step_6_embedding_ms": 644.79,
+        "step_7_consensus_ms": 0.95,
+        "total_wall_clock_s": 12.73,
+        "video_a_wall_ms": 5973.8,
+        "video_b_wall_ms": 6759.1
+      }
+    ],
+    "median": {
+      "step_1_sampling_ms": 2032.94,
+      "step_2_detector_ms": 2657.4,
+      "step_3_alignment_ms": 247.64,
+      "step_4_groove_ms": 3778.23,
+      "step_5_skeleton_ms": 3148.68,
+      "step_6_embedding_ms": 638.75,
+      "step_7_consensus_ms": 0.95,
+      "total_wall_clock_s": 12.6
+    },
+    "mean": {
+      "step_1_sampling_ms": 2011.02,
+      "step_2_detector_ms": 2661.2,
+      "step_3_alignment_ms": 250.75,
+      "step_4_groove_ms": 3799.85,
+      "step_5_skeleton_ms": 3139.42,
+      "step_6_embedding_ms": 616.23,
+      "step_7_consensus_ms": 0.95,
+      "total_wall_clock_s": 12.55
+    },
+    "share_pct": {
+      "step_1_sampling_ms": 16.3,
+      "step_2_detector_ms": 21.3,
+      "step_3_alignment_ms": 2.0,
+      "step_4_groove_ms": 30.2,
+      "step_5_skeleton_ms": 25.2,
+      "step_6_embedding_ms": 5.1,
+      "step_7_consensus_ms": 0.0
+    }
+  },
+  "CPU-2": {
+    "profile": "CPU-2",
+    "device": "cpu",
+    "cpu_cores": 2,
+    "runs": [
+      {
+        "step_1_sampling_ms": 1941.52,
+        "step_2_detector_ms": 2700.48,
+        "step_3_alignment_ms": 276.97,
+        "step_4_groove_ms": 3754.6,
+        "step_5_skeleton_ms": 3066.99,
+        "step_6_embedding_ms": 1036.2,
+        "step_7_consensus_ms": 1.0,
+        "total_wall_clock_s": 12.84,
+        "video_a_wall_ms": 6231.93,
+        "video_b_wall_ms": 6606.62
+      },
+      {
+        "step_1_sampling_ms": 2069.36,
+        "step_2_detector_ms": 2702.59,
+        "step_3_alignment_ms": 275.01,
+        "step_4_groove_ms": 3725.2,
+        "step_5_skeleton_ms": 3011.43,
+        "step_6_embedding_ms": 1018.22,
+        "step_7_consensus_ms": 0.95,
+        "total_wall_clock_s": 12.86,
+        "video_a_wall_ms": 6328.82,
+        "video_b_wall_ms": 6534.49
+      },
+      {
+        "step_1_sampling_ms": 1942.73,
+        "step_2_detector_ms": 2692.36,
+        "step_3_alignment_ms": 274.19,
+        "step_4_groove_ms": 3742.86,
+        "step_5_skeleton_ms": 3069.13,
+        "step_6_embedding_ms": 1034.32,
+        "step_7_consensus_ms": 0.94,
+        "total_wall_clock_s": 12.82,
+        "video_a_wall_ms": 6260.82,
+        "video_b_wall_ms": 6558.06
+      }
+    ],
+    "median": {
+      "step_1_sampling_ms": 1942.73,
+      "step_2_detector_ms": 2700.48,
+      "step_3_alignment_ms": 275.01,
+      "step_4_groove_ms": 3742.86,
+      "step_5_skeleton_ms": 3066.99,
+      "step_6_embedding_ms": 1034.32,
+      "step_7_consensus_ms": 0.95,
+      "total_wall_clock_s": 12.84
+    },
+    "mean": {
+      "step_1_sampling_ms": 1984.54,
+      "step_2_detector_ms": 2698.48,
+      "step_3_alignment_ms": 275.39,
+      "step_4_groove_ms": 3740.89,
+      "step_5_skeleton_ms": 3049.18,
+      "step_6_embedding_ms": 1029.58,
+      "step_7_consensus_ms": 0.96,
+      "total_wall_clock_s": 12.84
+    },
+    "share_pct": {
+      "step_1_sampling_ms": 15.2,
+      "step_2_detector_ms": 21.2,
+      "step_3_alignment_ms": 2.2,
+      "step_4_groove_ms": 29.3,
+      "step_5_skeleton_ms": 24.0,
+      "step_6_embedding_ms": 8.1,
+      "step_7_consensus_ms": 0.0
+    }
+  }
+}
