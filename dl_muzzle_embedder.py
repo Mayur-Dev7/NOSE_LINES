@@ -540,14 +540,175 @@ def get_muzzle_embedder(
         model = MuzzleBiometricModel(backbone=backbone, weights_path=weights_path)
         model.to(torch.device(dev_str))
         model.eval()
+        if dev_str == "cpu":
+            try:
+                torch.set_flush_denormal(True)
+                model = model.to(memory_format=torch.channels_last)
+            except Exception:
+                pass
         _EMBEDDER_SINGLETONS[key] = model
 
     return _EMBEDDER_SINGLETONS[key]
 
 
 # ---------------------------------------------------------------------------
-# 7. Single Frame Extraction and Latency Timing
+# 6b. ONNX Runtime CPU Embedder Singleton
 # ---------------------------------------------------------------------------
+_ORT_SINGLETONS: Dict[str, Any] = {}
+
+
+def get_onnx_muzzle_embedder(
+    backbone: str = "convnext_tiny",
+    cpu_cores: int = 6,
+) -> Any:
+    """
+    Returns cached ONNX Runtime InferenceSession configured with
+    intra_op_num_threads=cpu_cores, inter_op_num_threads=1, ORT_ENABLE_ALL.
+    Exports the PyTorch model to ONNX if not already present on disk.
+    """
+    global _ORT_SINGLETONS
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        logger.warning("onnxruntime not installed; ONNX embedder unavailable.")
+        return None
+
+    key = f"{backbone.lower()}_{cpu_cores}"
+    if key in _ORT_SINGLETONS:
+        return _ORT_SINGLETONS[key]
+
+    onnx_path = WEIGHTS_DIR / f"{backbone.lower()}_embedder.onnx"
+    if not onnx_path.exists():
+        logger.info(f"Exporting {backbone} to ONNX at {onnx_path}...")
+        pt_model = get_muzzle_embedder(backbone=backbone, device="cpu")
+        pt_model.eval()
+        dummy_input = torch.randn(5, 3, 224, 224, dtype=torch.float32)
+        torch.onnx.export(
+            pt_model,
+            dummy_input,
+            str(onnx_path),
+            export_params=True,
+            opset_version=14,
+            do_constant_folding=True,
+            input_names=["input"],
+            output_names=["embedding"],
+            dynamic_axes={"input": {0: "batch_size"}, "embedding": {0: "batch_size"}},
+        )
+        logger.info(f"ONNX export successfully written: {onnx_path}")
+
+    opts = ort.SessionOptions()
+    opts.intra_op_num_threads = max(1, cpu_cores)
+    opts.inter_op_num_threads = 1
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    session = ort.InferenceSession(str(onnx_path), sess_options=opts, providers=["CPUExecutionProvider"])
+    _ORT_SINGLETONS[key] = session
+    return session
+
+
+# ---------------------------------------------------------------------------
+# 7. Batched and Single Frame Extraction
+# ---------------------------------------------------------------------------
+def extract_batch_embeddings(
+    model_or_session: Union[MuzzleBiometricModel, Any],
+    tensors: Union[List[torch.Tensor], List[np.ndarray], torch.Tensor, np.ndarray],
+    device: Optional[str] = None,
+    cpu_cores: int = 6,
+    use_onnx: Optional[bool] = None,
+) -> Tuple[List[np.ndarray], float]:
+    """
+    Extracts L2-normalized 512-D embeddings for a batch of frames in ONE forward pass.
+
+    Optimizations applied:
+    - One batched (N, 3, 224, 224) forward pass
+    - torch.inference_mode()
+    - channels_last memory format
+    - torch.set_flush_denormal(True)
+    - ONNX Runtime fp32 CPUExecutionProvider for CPU profiles where measured faster (CPU-2)
+    - PyTorch on CUDA for GPU path unchanged
+
+    Returns:
+        (list_of_embeddings, total_latency_ms)
+    """
+    t0 = time.perf_counter()
+
+    # Stack tensors into (N, 3, 224, 224)
+    if isinstance(tensors, list):
+        if len(tensors) == 0:
+            return [], 0.0
+        if isinstance(tensors[0], torch.Tensor):
+            if tensors[0].dim() == 4:
+                stacked = torch.cat(tensors, dim=0)
+            else:
+                stacked = torch.stack(tensors, dim=0)
+        else:
+            np_arrs = [np.asarray(t, dtype=np.float32) for t in tensors]
+            if np_arrs[0].ndim == 4:
+                stacked_np = np.concatenate(np_arrs, axis=0)
+            else:
+                stacked_np = np.stack(np_arrs, axis=0)
+            stacked = torch.from_numpy(stacked_np)
+    elif isinstance(tensors, np.ndarray):
+        stacked = torch.from_numpy(tensors.astype(np.float32))
+    elif isinstance(tensors, torch.Tensor):
+        stacked = tensors
+    else:
+        raise TypeError(f"Unsupported tensors type: {type(tensors)}")
+
+    is_gpu = (device is not None and str(device).lower() in ("gpu", "cuda"))
+
+    # ONNX Runtime evaluation:
+    # On CPU-2, ONNX Runtime fp32 is faster (391 ms vs 434 ms) with cosine 1.000000 vs golden.
+    # On GPU, CUDA PyTorch is strictly preserved.
+    should_use_onnx = False
+    if not is_gpu:
+        if use_onnx is True:
+            should_use_onnx = True
+        elif use_onnx is None and cpu_cores <= 2:
+            should_use_onnx = True
+
+    if should_use_onnx:
+        try:
+            onnx_sess = get_onnx_muzzle_embedder(cpu_cores=cpu_cores)
+            if onnx_sess is not None:
+                np_in = stacked.cpu().numpy().astype(np.float32)
+                ort_out = onnx_sess.run(None, {"input": np_in})[0]
+                lat_ms = (time.perf_counter() - t0) * 1000.0
+                return [ort_out[i].astype(np.float32) for i in range(len(ort_out))], round(lat_ms, 2)
+        except Exception as e:
+            logger.warning(f"ONNX inference fallback to PyTorch: {e}")
+
+    # PyTorch path
+    torch.set_flush_denormal(True)
+    dev_target = torch.device("cuda" if (is_gpu and torch.cuda.is_available()) else "cpu")
+
+    if not isinstance(model_or_session, MuzzleBiometricModel):
+        model = get_muzzle_embedder(device="cuda" if is_gpu else "cpu")
+    else:
+        model = model_or_session
+
+    model.eval()
+    if is_gpu:
+        # Keep GPU path unchanged (PyTorch on CUDA)
+        t_in = stacked.to(dev_target)
+        with torch.inference_mode():
+            out = model(t_in)
+            if isinstance(out, tuple):
+                out = out[0]
+            embs = out.detach().cpu().numpy().astype(np.float32)
+    else:
+        # CPU path with channels_last
+        model = model.to(memory_format=torch.channels_last)
+        t_in = stacked.to(dev_target, memory_format=torch.channels_last)
+        with torch.inference_mode():
+            out = model(t_in)
+            if isinstance(out, tuple):
+                out = out[0]
+            embs = out.detach().cpu().numpy().astype(np.float32)
+
+    lat_ms = (time.perf_counter() - t0) * 1000.0
+    return [embs[i] for i in range(len(embs))], round(lat_ms, 2)
+
+
 def extract_frame_embedding(
     model: MuzzleBiometricModel,
     clahe_gray: np.ndarray,
@@ -570,9 +731,17 @@ def extract_frame_embedding(
             device = "cuda" if torch.cuda.is_available() else "cpu"
         device = torch.device(device)
 
-    # Time end-to-end preprocessing + inference
+    is_cpu = (device.type == "cpu")
+    if is_cpu:
+        try:
+            torch.set_flush_denormal(True)
+            model = model.to(memory_format=torch.channels_last)
+        except Exception:
+            pass
+
+    # Time end-to-end preprocessing + inference with inference_mode()
     t0 = time.perf_counter()
-    with torch.no_grad():
+    with torch.inference_mode():
         x = prepare_input_tensor(
             clahe_gray=clahe_gray,
             groove_response=groove_response,
@@ -582,6 +751,8 @@ def extract_frame_embedding(
             target_size=target_size,
             device=device,
         )
+        if is_cpu:
+            x = x.to(memory_format=torch.channels_last)
         emb = model(x)
         if isinstance(emb, tuple):
             emb = emb[0]

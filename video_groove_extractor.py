@@ -823,6 +823,7 @@ def extract_five_muzzle_stages(
     dl_model = None
     dl_frame_embeddings: List[np.ndarray] = []
     dl_frame_tensors: List[np.ndarray] = []
+    dl_pending_tensors: List[Any] = []
     dl_latencies: List[float] = []
     dl_confidences: List[float] = []
     dl_blur_variances: List[float] = []
@@ -966,13 +967,10 @@ def extract_five_muzzle_stages(
         matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
         matcher_gray = enhanced_gray.copy()
 
-        # Step 6: ConvNeXt-Tiny ArcFace 512-D spatial GeM latent inference
-        t_dl_start = time.perf_counter()
-        dl_frame_emb = None
-        dl_lat_ms = 0.0
+        # Step 6: Prepare tensor for batched ConvNeXt latent inference
         if dl_model is not None:
             try:
-                from dl_muzzle_embedder import extract_frame_embedding, prepare_input_tensor
+                from dl_muzzle_embedder import prepare_input_tensor
                 raw_t = prepare_input_tensor(
                     clahe_gray=matcher_gray,
                     groove_response=groove_response,
@@ -982,22 +980,11 @@ def extract_five_muzzle_stages(
                     device="cpu",
                 )
                 dl_frame_tensors.append(raw_t.squeeze(0).cpu().numpy())
-                dl_frame_emb, dl_lat_ms = extract_frame_embedding(
-                    model=dl_model,
-                    clahe_gray=matcher_gray,
-                    groove_response=groove_response,
-                    skeleton=pruned_skeleton,
-                    mask=matcher_mask,
-                    input_mode=dl_input_mode,
-                    device=device,
-                )
-                dl_frame_embeddings.append(dl_frame_emb)
-                dl_latencies.append(dl_lat_ms)
+                dl_pending_tensors.append(raw_t)
                 dl_confidences.append(float(conf))
                 dl_blur_variances.append(float(lap_var))
             except Exception as e:
-                log(f"Warning: DL embedding extraction failed on frame {i + 1}: {e}")
-        t_dl_inference_ms += (time.perf_counter() - t_dl_start) * 1000.0
+                log(f"Warning: DL tensor prep failed on frame {i + 1}: {e}")
 
         frames_records.append({
             "frame_number": i + 1,
@@ -1026,10 +1013,33 @@ def extract_five_muzzle_stages(
             "alignment_method": alignment_method,
             "rotation_deg": round(float(angle_deg), 2),
             "minutiae": minutiae,
-            "dl_embedding": np.round(dl_frame_emb, 5).tolist() if dl_frame_emb is not None else [],
-            "dl_inference_ms": dl_lat_ms,
+            "dl_embedding": [],
+            "dl_inference_ms": 0.0,
         })
-        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae" + (f" | DL {dl_lat_ms:.1f}ms" if dl_lat_ms > 0 else ""))
+        log(f" -> [Frame {i + 1}/5] Lines extracted: {params['skeleton_pixels']} skel px, {params['endpoints']} ends, {params['junctions']} juncs, {params['cycles']} loops, {len(minutiae)} minutiae")
+
+    # Step 6: One batched (5, 3, 224, 224) forward pass with channels_last / ONNX
+    t_dl_start = time.perf_counter()
+    if dl_model is not None and dl_pending_tensors:
+        try:
+            from dl_muzzle_embedder import extract_batch_embeddings
+            batch_embs, batch_lat_ms = extract_batch_embeddings(
+                model_or_session=dl_model,
+                tensors=dl_pending_tensors,
+                device=device,
+                cpu_cores=cpu_cores,
+            )
+            dl_frame_embeddings = batch_embs
+            per_frame_lat = round(batch_lat_ms / max(1, len(batch_embs)), 2)
+            dl_latencies = [per_frame_lat] * len(batch_embs)
+            for idx, emb in enumerate(batch_embs):
+                if idx < len(frames_records):
+                    frames_records[idx]["dl_embedding"] = np.round(emb, 5).tolist()
+                    frames_records[idx]["dl_inference_ms"] = per_frame_lat
+            log(f"Step 6 Batched Latent Inference completed: {len(batch_embs)} frames in {batch_lat_ms:.1f}ms ({per_frame_lat:.1f}ms/frame)")
+        except Exception as e:
+            log(f"Warning: DL batched embedding extraction failed: {e}")
+    t_dl_inference_ms = (time.perf_counter() - t_dl_start) * 1000.0
 
     # Ensure all background disk writes are complete
     for fut in disk_futures:
