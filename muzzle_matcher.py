@@ -978,31 +978,17 @@ def match_two_videos_end_to_end(
     2. Extracts 5 muzzle stage frames from Video B using extract_five_muzzle_stages.
     3. Runs 5x5 All-Pairs Biometric Comparison (SIFT/RANSAC + Minutiae Matching).
     """
-    from video_groove_extractor import extract_five_muzzle_stages
+    from video_groove_extractor import extract_two_videos_biometric_stages
 
     out_dir = Path(output_dir) if output_dir else (SCRIPT_DIR / "output")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if log_callback:
-        log_callback(f"Extracting 5 muzzle stages from Video A: {Path(video_a_path).name}...")
+        log_callback(f"Extracting 5 muzzle stages from Video A and Video B (pipelined on GPU, sequential on CPU)...")
 
-    res_a = extract_five_muzzle_stages(
-        video_path=video_a_path,
-        method=filter_method,
-        threshold_method=threshold_method,
-        adaptive_block_size=adaptive_block_size,
-        adaptive_c=adaptive_c,
-        exclude_nostrils=exclude_nostrils,
-        device=device,
-        cpu_cores=cpu_cores,
-        log_callback=log_callback,
-    )
-
-    if log_callback:
-        log_callback(f"Extracting 5 muzzle stages from Video B: {Path(video_b_path).name}...")
-
-    res_b = extract_five_muzzle_stages(
-        video_path=video_b_path,
+    res_a, res_b = extract_two_videos_biometric_stages(
+        video_a_path=video_a_path,
+        video_b_path=video_b_path,
         method=filter_method,
         threshold_method=threshold_method,
         adaptive_block_size=adaptive_block_size,

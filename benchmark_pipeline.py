@@ -25,6 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from video_groove_extractor import (
     extract_five_muzzle_stages,
+    extract_two_videos_biometric_stages,
     compute_cosine_similarity,
 )
 from server import resolve_video_path
@@ -49,23 +50,15 @@ def run_single_comparison(
 
     t_wall_start = time.perf_counter()
 
-    # Step 1-6 for Video A
-    t_start_a = time.perf_counter()
-    res_a = extract_five_muzzle_stages(
-        video_path=str(resolved_a),
+    # Step 1-6 for Video A and Video B (pipelined on GPU, sequential on CPU)
+    res_a, res_b = extract_two_videos_biometric_stages(
+        video_a_path=str(resolved_a),
+        video_b_path=str(resolved_b),
         device=device,
         cpu_cores=cpu_cores,
     )
-    t_a_wall = (time.perf_counter() - t_start_a) * 1000.0
-
-    # Step 1-6 for Video B
-    t_start_b = time.perf_counter()
-    res_b = extract_five_muzzle_stages(
-        video_path=str(resolved_b),
-        device=device,
-        cpu_cores=cpu_cores,
-    )
-    t_b_wall = (time.perf_counter() - t_start_b) * 1000.0
+    t_a_wall = res_a.get("step_timings", {}).get("t_total_ms", 0.0)
+    t_b_wall = res_b.get("step_timings", {}).get("t_total_ms", 0.0)
 
     # Step 7: Biometric Consensus & Verification
     t_start_7 = time.perf_counter()

@@ -36,12 +36,42 @@ from groove_graph import extract_skeleton_graph, visualize_groove_graph, prune_s
 OUTPUT_BASE = PROJECT_ROOT / "output" / "video_five_frames"
 OUTPUT_BASE.mkdir(parents=True, exist_ok=True)
 
+from cv_workers import (
+    get_worker_pool,
+    close_worker_pool,
+    process_frame_stages_3_5,
+    canonical_align_muzzle,
+    get_physical_cores,
+)
+
+# Pre-fork persistent spawn process pool at startup BEFORE TF/CUDA initialization
+try:
+    get_worker_pool()
+except Exception as _pool_init_err:
+    pass
+
 logger = logging.getLogger("video_groove_extractor")
 if not logger.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s"))
     logger.addHandler(handler)
     logger.setLevel(logging.INFO)
+
+
+def _log_telemetry(msg: str):
+    """Logs warning message and records it into the live UI telemetry buffer if available."""
+    logger.warning(msg)
+    try:
+        from datetime import datetime
+        from server import _PIPELINE_LOGS
+        _PIPELINE_LOGS.append({
+            "timestamp": datetime.now().strftime("%H:%M:%S.%f")[:-3],
+            "level": "WARNING",
+            "message": msg,
+            "logger": "video_groove_extractor",
+        })
+    except Exception:
+        pass
 
 # Normalization bounds for 10-D muzzle feature vector dimensions
 FEATURE_SCALES = [
@@ -515,8 +545,7 @@ def canonical_align_muzzle(crop_bgr, mask, target_size=448):
         "nostril_points": points,
     }
 
-# Optional frame-selection options accepted by the API wrapper; defaults preserve previous callers.
-def extract_five_muzzle_stages(
+def _extract_stages_1_and_2(
     video_path: Union[str, Path],
     method: str = "frangi",                     # 'frangi' (Frangi Hessian) or 'blackhat'
     threshold_method: str = "adaptive",         # 'adaptive' (Adaptive Gaussian) or 'otsu' (Standard)
@@ -533,20 +562,6 @@ def extract_five_muzzle_stages(
     dl_input_mode: str = "composite_3ch",
     enable_dl_embedding: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Genuine end-to-end extraction with quality gating and canonical alignment:
-    1. Loads singleton Mask R-CNN detector with weights (crop11dec.h5).
-    2. Samples ~30 candidate frames evenly distributed across video duration.
-    3. Evaluates motion blur (Laplacian variance) and detects muzzle with Mask R-CNN.
-    4. Applies confidence, Laplacian sharpness, border-margin and mask-area gates from matching_params.json.
-    5. Scores valid candidates and selects top_k_frames temporally spread-out frames.
-    6. Canonically aligns each crop (nostril leveling / moment symmetry) to 448x448.
-    7. Applies CLAHE ridge enhancement on aligned crop.
-    8. Applies Frangi Hessian or Black-Hat filtering + Adaptive/Otsu thresholding.
-    9. Generates 1-pixel thin skeleton and prunes spurious branches / noise components.
-    10. Calculates the 10 minutiae parameters and minutiae point list (x, y, type, orientation).
-    11. Saves all 5 stage images per frame and returns vectors and URLs.
-    """
     def log(msg: str):
         logger.info(msg)
         if log_callback:
@@ -834,6 +849,88 @@ def extract_five_muzzle_stages(
     t_detector_ms = (time.perf_counter() - t_detector_start) * 1000.0
     log(f"Selected {len(detected_candidates)} frames for groove extraction: {[c['frame_idx'] for c in detected_candidates]}")
 
+    # Build tasks for concurrent execution in Steps 3-5
+    tasks = []
+    for candidate in detected_candidates:
+        tasks.append({
+            "frame_idx": candidate["frame_idx"],
+            "native_crop": candidate["native_crop"],
+            "crop_mask": candidate.get("crop_mask"),
+            "confidence": float(candidate.get("confidence", 0.0)),
+            "laplacian_var": float(candidate.get("laplacian_var", 0.0)),
+            "timestamp_sec": float(candidate.get("timestamp_sec", 0.0)),
+            "bbox": candidate.get("bbox", []),
+            "canonical_size": canonical_size,
+            "method": method,
+            "threshold_method": threshold_method,
+            "adaptive_block_size": adaptive_block_size,
+            "adaptive_c": adaptive_c,
+            "scales": scales,
+            "exclude_nostrils": exclude_nostrils,
+            "min_spur_length": min_spur_length,
+            "min_component_size": min_component_size,
+            "max_minutiae_points": int(matcher_params.get("max_minutiae_points", 250)),
+        })
+
+    return {
+        "v_path": v_path,
+        "stem": stem,
+        "cache_dir": cache_dir,
+        "fps": fps,
+        "total_frames": total_frames,
+        "t_start_total": t_start_total,
+        "device_used": device_used,
+        "device": device,
+        "cpu_cores": cpu_cores,
+        "method": method,
+        "threshold_method": threshold_method,
+        "adaptive_block_size": adaptive_block_size,
+        "adaptive_c": adaptive_c,
+        "scales": scales,
+        "exclude_nostrils": exclude_nostrils,
+        "min_spur_length": min_spur_length,
+        "min_component_size": min_component_size,
+        "canonical_size": canonical_size,
+        "matcher_params": matcher_params,
+        "dl_backbone": dl_backbone,
+        "dl_input_mode": dl_input_mode,
+        "enable_dl_embedding": enable_dl_embedding,
+        "detected_candidates": detected_candidates,
+        "tasks": tasks,
+        "t_sampling_ms": t_sampling_ms,
+        "t_detector_ms": t_detector_ms,
+        "log_callback": log_callback,
+    }
+
+
+def _complete_stages_after_pool(
+    ctx: Dict[str, Any],
+    worker_results: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    def log(msg: str):
+        logger.info(msg)
+        if ctx.get("log_callback"):
+            try:
+                ctx["log_callback"](msg)
+            except Exception:
+                pass
+
+    v_path = ctx["v_path"]
+    cache_dir = ctx["cache_dir"]
+    method = ctx["method"]
+    threshold_method = ctx["threshold_method"]
+    adaptive_block_size = ctx["adaptive_block_size"]
+    adaptive_c = ctx["adaptive_c"]
+    device = ctx["device"]
+    cpu_cores = ctx["cpu_cores"]
+    device_used = ctx["device_used"]
+    dl_backbone = ctx["dl_backbone"]
+    dl_input_mode = ctx["dl_input_mode"]
+    enable_dl_embedding = ctx["enable_dl_embedding"]
+    t_start_total = ctx["t_start_total"]
+    t_sampling_ms = ctx["t_sampling_ms"]
+    t_detector_ms = ctx["t_detector_ms"]
+
     # Deep learning embedder initialization
     dl_model = None
     dl_frame_embeddings: List[np.ndarray] = []
@@ -854,105 +951,31 @@ def extract_five_muzzle_stages(
     disk_executor = concurrent.futures.ThreadPoolExecutor(max_workers=min(cpu_cores, 6))
     disk_futures = []
 
-    # Step timings accumulators
-    t_canonical_clahe_ms = 0.0
-    t_groove_extract_ms = 0.0
-    t_skeleton_minutiae_ms = 0.0
+    t_canonical_clahe_ms = max((w.get("t_step3_ms", 0.0) for w in worker_results), default=0.0)
+    t_groove_extract_ms = max((w.get("t_step4_ms", 0.0) for w in worker_results), default=0.0)
+    t_skeleton_minutiae_ms = max((w.get("t_step5_ms", 0.0) for w in worker_results), default=0.0)
     t_dl_inference_ms = 0.0
 
     frames_records = []
     param_lists: Dict[str, List[float]] = {k: [] for k in FEATURE_KEYS}
 
-    for i, candidate in enumerate(detected_candidates):
-        f_idx = candidate["frame_idx"]
-        native_bgr = candidate["native_crop"]
-        crop_mask = candidate["crop_mask"]
-        conf = candidate["confidence"]
-        lap_var = candidate.get("laplacian_var", 0.0)
-
-        log(f"[Frame {i + 1}/5] Processing muzzle from frame #{f_idx} (native size {native_bgr.shape[1]}x{native_bgr.shape[0]})...")
-
-        # Step 3: Canonical Alignment & CLAHE local contrast normalization
-        t_align_start = time.perf_counter()
-        aligned_bgr, aligned_mask, align_meta = canonical_align_muzzle(
-            native_bgr, mask=crop_mask, target_size=canonical_size
-        )
-        angle_deg = float(align_meta.get("rotation_deg", 0.0))
-        alignment_method = align_meta.get("alignment_method", "mask_principal_axis")
-        upscaled_bgr = aligned_bgr
-        mask_up = aligned_mask
-
-        gray_up = cv2.cvtColor(upscaled_bgr, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray_up, (0, 0), sigmaX=1.5, sigmaY=1.5)
-        gray_unsharp = cv2.addWeighted(gray_up, 1.5, blurred, -0.5, 0)
-        clahe_filter = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
-        enhanced_gray = clahe_filter.apply(gray_unsharp)
-        t_canonical_clahe_ms += (time.perf_counter() - t_align_start) * 1000.0
-
-        # Step 4: Multi-scale Black-Hat / Frangi groove filtering & adaptive threshold
-        t_groove_start = time.perf_counter()
-        enh_bgr = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
-        groove_res = extract_muzzle_grooves_pipeline(
-            image_bgr=enh_bgr,
-            mask=mask_up,
-            method=method,                     # 'frangi' (Frangi Hessian) or 'blackhat'
-            threshold_method=threshold_method, # 'adaptive' (Adaptive Gaussian) or 'otsu'
-            adaptive_block_size=adaptive_block_size,
-            adaptive_c=adaptive_c,
-            scales=scales,
-            exclude_nostrils=exclude_nostrils,
-        )
-
-        groove_response = groove_res["enhanced_response"]
-        groove_mask = groove_res["groove_mask"]
-        raw_skeleton = groove_res["groove_skeleton"]
-        t_groove_extract_ms += (time.perf_counter() - t_groove_start) * 1000.0
-
-        # Step 5: Thin skeletonization, graph topology & minutiae extraction
-        t_skel_start = time.perf_counter()
-        pruned_skeleton = prune_skeleton(
-            raw_skeleton,
-            min_spur_length=min_spur_length,
-            min_component_size=min_component_size,
-        )
-
-        graph_res = extract_skeleton_graph(
-            pruned_skeleton,
-            mask=groove_res.get("mask"),
-            prune=False,  # Already pruned
-        )
-        desc = graph_res["descriptors"]
-        overlay = visualize_groove_graph(upscaled_bgr, graph_res)
-
-        params = {
-            "groove_pixels": int(groove_res["num_groove_pixels"]),
-            "skeleton_pixels": int(desc["skeleton_pixel_count"]),
-            "groove_coverage_pct": round(float(groove_res["groove_coverage_pct"]), 2),
-            "endpoints": int(desc["endpoint_count"]),
-            "junctions": int(desc["junction_count"]),
-            "connected_components": int(desc["connected_component_count"]),
-            "mean_branch_length": round(float(desc["mean_branch_length"]), 2),
-            "cycles": int(desc["cycle_count"]),
-            "density": round(float(desc["skeleton_density"]), 4),
-            "euler_characteristic": int(desc["euler_characteristic"]),
-        }
-
-        ranked_minutiae = extract_minutiae_points(
-            pruned_skeleton,
-            max_points=int(matcher_params.get("max_minutiae_points", 250)),
-        )
-        minutiae = [
-            {
-                "x": float(point["x"]),
-                "y": float(point["y"]),
-                "type": point["type"],
-                "orientation": float(point["angle"]),
-                "angle": float(point["angle"]),
-                "weight": float(point["weight"]),
-            }
-            for point in ranked_minutiae
-        ]
-        t_skeleton_minutiae_ms += (time.perf_counter() - t_skel_start) * 1000.0
+    for i, w_res in enumerate(worker_results):
+        f_idx = w_res["frame_idx"]
+        native_bgr = w_res["native_bgr"]
+        conf = w_res["confidence"]
+        lap_var = w_res["laplacian_var"]
+        angle_deg = w_res["angle_deg"]
+        alignment_method = w_res["alignment_method"]
+        enhanced_gray = w_res["enhanced_gray"]
+        groove_response = w_res["groove_response"]
+        groove_mask = w_res["groove_mask"]
+        pruned_skeleton = w_res["pruned_skeleton"]
+        overlay = w_res["overlay"]
+        params = w_res["params"]
+        minutiae = w_res["minutiae"]
+        matcher_gray = w_res["matcher_gray"]
+        matcher_mask = w_res["matcher_mask"]
+        matcher_skeleton = w_res["matcher_skeleton"]
 
         # Fast background image persistence to avoid disk I/O bottleneck
         p_crop = cache_dir / f"frame_{i}_01_native_crop.jpg"
@@ -973,9 +996,6 @@ def extract_five_muzzle_stages(
             param_lists[k].append(params[k])
 
         rel_base = f"/output/video_five_frames/{cache_dir.name}"
-        matcher_mask = np.where(np.asarray(mask_up) > 0, 255, 0).astype(np.uint8) if mask_up is not None else np.full((canonical_size, canonical_size), 255, dtype=np.uint8)
-        matcher_skeleton = np.where((pruned_skeleton > 0) & (matcher_mask > 0), 255, 0).astype(np.uint8)
-        matcher_gray = enhanced_gray.copy()
 
         # Step 6: ConvNeXt-Tiny ArcFace 512-D spatial GeM latent inference
         t_dl_start = time.perf_counter()
@@ -1013,8 +1033,8 @@ def extract_five_muzzle_stages(
         frames_records.append({
             "frame_number": i + 1,
             "frame_idx": f_idx,
-            "timestamp_sec": candidate["timestamp_sec"],
-            "bbox": candidate.get("bbox", []),
+            "timestamp_sec": w_res["timestamp_sec"],
+            "bbox": w_res.get("bbox", []),
             "confidence": round(float(conf), 3),
             "laplacian_var": round(float(lap_var), 2),
             "canonical_angle_deg": round(float(angle_deg), 2),
@@ -1144,8 +1164,6 @@ def extract_five_muzzle_stages(
         "timestamp": int(time.time()),
     }
 
-    # Matcher-only NumPy arrays stay in memory for the API cache and are never
-    # written to JSON files or exposed in HTTP JSON responses.
     summary_payload = dict(result)
     summary_payload.pop("dl_tensors", None)
     summary_payload["frames"] = [
@@ -1157,6 +1175,192 @@ def extract_five_muzzle_stages(
 
     log(f"Completed 5-frame groove parameter extraction for {v_path.name} successfully.")
     return result
+
+
+def extract_five_muzzle_stages(
+    video_path: Union[str, Path],
+    method: str = "frangi",                     # 'frangi' (Frangi Hessian) or 'blackhat'
+    threshold_method: str = "adaptive",         # 'adaptive' (Adaptive Gaussian) or 'otsu' (Standard)
+    adaptive_block_size: int = 15,
+    adaptive_c: int = 2,
+    scales: List[int] = [9, 15, 21],
+    exclude_nostrils: bool = True,
+    device: str = "cpu",
+    cpu_cores: int = 6,
+    log_callback: Optional[Any] = None,
+    min_spur_length: int = 8,
+    min_component_size: int = 30,
+    dl_backbone: str = "convnext_tiny",
+    dl_input_mode: str = "composite_3ch",
+    enable_dl_embedding: bool = True,
+) -> Dict[str, Any]:
+    """
+    5-frame cattle muzzle groove extraction pipeline.
+    Runs Steps 3-5 concurrently for the 5 selected frames using the persistent spawn process pool.
+    Falls back to serial processing on worker failure and logs to telemetry buffer.
+    """
+    ctx = _extract_stages_1_and_2(
+        video_path=video_path,
+        method=method,
+        threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
+        scales=scales,
+        exclude_nostrils=exclude_nostrils,
+        device=device,
+        cpu_cores=cpu_cores,
+        log_callback=log_callback,
+        min_spur_length=min_spur_length,
+        min_component_size=min_component_size,
+        dl_backbone=dl_backbone,
+        dl_input_mode=dl_input_mode,
+        enable_dl_embedding=enable_dl_embedding,
+    )
+
+    pool_size = 2 if cpu_cores == 2 else min(get_physical_cores(), 6)
+    worker_results: Optional[List[Dict[str, Any]]] = None
+
+    try:
+        pool = get_worker_pool(pool_size=pool_size)
+        worker_results = pool.map(process_frame_stages_3_5, ctx["tasks"])
+    except Exception as exc:
+        fallback_msg = f"[Fallback] CV worker process pool error: {exc}. Reverting to serial execution for Steps 3-5."
+        _log_telemetry(fallback_msg)
+        worker_results = [process_frame_stages_3_5(t) for t in ctx["tasks"]]
+
+    return _complete_stages_after_pool(ctx, worker_results)
+
+
+def extract_two_videos_biometric_stages(
+    video_a_path: Union[str, Path],
+    video_b_path: Union[str, Path],
+    device: str = "gpu",
+    cpu_cores: int = 6,
+    method: str = "frangi",
+    threshold_method: str = "adaptive",
+    adaptive_block_size: int = 15,
+    adaptive_c: int = 2,
+    scales: List[int] = [9, 15, 21],
+    exclude_nostrils: bool = True,
+    log_callback: Optional[Any] = None,
+    min_spur_length: int = 8,
+    min_component_size: int = 30,
+    dl_backbone: str = "convnext_tiny",
+    dl_input_mode: str = "composite_3ch",
+    enable_dl_embedding: bool = True,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    Two-video biometric pipeline with GPU pipelining.
+    When device == 'gpu', overlaps Video B's Mask R-CNN (GPU) with Video A's Steps 3-5 (CPU pool).
+    When device == 'cpu', runs strictly sequentially to prevent CPU core/cache thrashing.
+    """
+    if device.lower() != "gpu":
+        res_a = extract_five_muzzle_stages(
+            video_path=video_a_path,
+            method=method,
+            threshold_method=threshold_method,
+            adaptive_block_size=adaptive_block_size,
+            adaptive_c=adaptive_c,
+            scales=scales,
+            exclude_nostrils=exclude_nostrils,
+            device=device,
+            cpu_cores=cpu_cores,
+            log_callback=log_callback,
+            min_spur_length=min_spur_length,
+            min_component_size=min_component_size,
+            dl_backbone=dl_backbone,
+            dl_input_mode=dl_input_mode,
+            enable_dl_embedding=enable_dl_embedding,
+        )
+        res_b = extract_five_muzzle_stages(
+            video_path=video_b_path,
+            method=method,
+            threshold_method=threshold_method,
+            adaptive_block_size=adaptive_block_size,
+            adaptive_c=adaptive_c,
+            scales=scales,
+            exclude_nostrils=exclude_nostrils,
+            device=device,
+            cpu_cores=cpu_cores,
+            log_callback=log_callback,
+            min_spur_length=min_spur_length,
+            min_component_size=min_component_size,
+            dl_backbone=dl_backbone,
+            dl_input_mode=dl_input_mode,
+            enable_dl_embedding=enable_dl_embedding,
+        )
+        return res_a, res_b
+
+    # GPU Pipelined mode:
+    # 1. Video A: Step 1 & Step 2 (Mask R-CNN on GPU)
+    ctx_a = _extract_stages_1_and_2(
+        video_path=video_a_path,
+        method=method,
+        threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
+        scales=scales,
+        exclude_nostrils=exclude_nostrils,
+        device=device,
+        cpu_cores=cpu_cores,
+        log_callback=log_callback,
+        min_spur_length=min_spur_length,
+        min_component_size=min_component_size,
+        dl_backbone=dl_backbone,
+        dl_input_mode=dl_input_mode,
+        enable_dl_embedding=enable_dl_embedding,
+    )
+
+    # 2. Dispatch Video A Steps 3-5 to CPU worker pool asynchronously
+    pool_size = 2 if cpu_cores == 2 else min(get_physical_cores(), 6)
+    pool = get_worker_pool(pool_size=pool_size)
+    future_a = pool.map_async(process_frame_stages_3_5, ctx_a["tasks"])
+
+    # 3. While Video A Steps 3-5 run on CPU worker pool, run Video B Step 1 & Step 2 on GPU!
+    ctx_b = _extract_stages_1_and_2(
+        video_path=video_b_path,
+        method=method,
+        threshold_method=threshold_method,
+        adaptive_block_size=adaptive_block_size,
+        adaptive_c=adaptive_c,
+        scales=scales,
+        exclude_nostrils=exclude_nostrils,
+        device=device,
+        cpu_cores=cpu_cores,
+        log_callback=log_callback,
+        min_spur_length=min_spur_length,
+        min_component_size=min_component_size,
+        dl_backbone=dl_backbone,
+        dl_input_mode=dl_input_mode,
+        enable_dl_embedding=enable_dl_embedding,
+    )
+
+    # 4. Wait for Video A Steps 3-5 to finish
+    try:
+        worker_results_a = future_a.get()
+    except Exception as exc:
+        fallback_msg = f"[Fallback] CV worker pool error on Video A: {exc}. Reverting to serial execution."
+        _log_telemetry(fallback_msg)
+        worker_results_a = [process_frame_stages_3_5(t) for t in ctx_a["tasks"]]
+
+    # 5. Dispatch Video B Steps 3-5 to CPU worker pool asynchronously
+    future_b = pool.map_async(process_frame_stages_3_5, ctx_b["tasks"])
+
+    # 6. Complete Video A Step 6 (ConvNeXt-Tiny embedder) on GPU
+    res_a = _complete_stages_after_pool(ctx_a, worker_results_a)
+
+    # 7. Wait for Video B Steps 3-5 to finish
+    try:
+        worker_results_b = future_b.get()
+    except Exception as exc:
+        fallback_msg = f"[Fallback] CV worker pool error on Video B: {exc}. Reverting to serial execution."
+        _log_telemetry(fallback_msg)
+        worker_results_b = [process_frame_stages_3_5(t) for t in ctx_b["tasks"]]
+
+    # 8. Complete Video B Step 6 (ConvNeXt-Tiny embedder) on GPU
+    res_b = _complete_stages_after_pool(ctx_b, worker_results_b)
+
+    return res_a, res_b
 
 
 extract_five_frames_groove_features = extract_five_muzzle_stages
