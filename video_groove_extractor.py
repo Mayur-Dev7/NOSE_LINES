@@ -10,6 +10,9 @@ video_groove_extractor.py
 
 import os
 import sys
+
+# Enable oneDNN optimizations for accelerated CPU inference
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
 import json
 import time
 import math

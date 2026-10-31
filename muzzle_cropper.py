@@ -35,6 +35,9 @@ if os.environ.get("MRCNN_NVIDIA_CONFIGURED") != "1" and sys.argv and sys.argv[0]
                 env["MRCNN_NVIDIA_CONFIGURED"] = "1"
                 os.execve(sys.executable, [sys.executable, sys.argv[0]] + sys.argv[1:], env)
 
+# Enable oneDNN optimizations for accelerated CPU inference
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
+
 # Early CPU affinity & thread allocation before OpenMP / TensorFlow C++ engines initialize
 if "--cpu-cores" in sys.argv:
     try:
@@ -229,6 +232,7 @@ class CowMuzzleInferenceConfig(Config):
     NUM_CLASSES = 1 + 1  # 1 background + 1 cow muzzle
     DETECTION_MIN_CONFIDENCE = 0.70
     DETECTION_NMS_THRESHOLD = 0.30
+    DETECTION_MAX_INSTANCES = 10
     IMAGE_MIN_DIM = 800
     IMAGE_MAX_DIM = 1024
     IMAGE_RESIZE_MODE = "square"
@@ -263,17 +267,18 @@ class MuzzleDetectionPipeline:
         self.config = CowMuzzleInferenceConfig()
         self.config.DETECTION_MIN_CONFIDENCE = confidence_threshold
 
-        # Optimization:
-        # High-throughput 640x640 resolution with 50 ROIs gives 2.5x speedup with exact bounding box accuracy
+        # Optimization 6:
+        # High-throughput 640x640 resolution with 50 ROIs and 10 max detections
         self.config.IMAGE_MIN_DIM = 640
         self.config.IMAGE_MAX_DIM = 640
         self.config.POST_NMS_ROIS_INFERENCE = 50
+        self.config.DETECTION_MAX_INSTANCES = 10
 
         is_gpu = ("gpu" in self.device_desc.lower())
         if is_gpu:
             self.logger.info("[Optimization] GPU Engine active: 640x640 resolution, 50 ROIs (real-time ~60ms)")
         else:
-            self.logger.info(f"[Optimization] CPU Engine active: 640x640 resolution, 50 ROIs (Optimized for {cpu_cores or 'all'} cores, ~180ms)")
+            self.logger.info(f"[Optimization] CPU Engine active: 640x640 resolution, 50 ROIs, max_instances=10 (Optimized for {cpu_cores or 'all'} cores, ~180ms)")
 
         eff_cores = min(cpu_cores, 6) if (cpu_cores and cpu_cores > 0) else 6
         inter_cores = min(eff_cores, 2)
@@ -286,6 +291,7 @@ class MuzzleDetectionPipeline:
         if not is_gpu:
             tf_config.device_count["GPU"] = 0
         try:
+            tf.keras.backend.set_learning_phase(0)
             self.session = tf.Session(config=tf_config, graph=self.graph)
             tf.keras.backend.set_session(self.session)
         except Exception:
