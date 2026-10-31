@@ -10,6 +10,7 @@ Strict scope: /home/adis_mayur/F_CODES/nose_lines
 """
 
 from typing import Dict, List, Tuple, Optional, Any, Set
+from collections import defaultdict
 import math
 import cv2
 import networkx as nx
@@ -66,102 +67,146 @@ def prune_skeleton(
     min_spur_length: int = 8,
     min_component_size: int = 30,
 ) -> np.ndarray:
-    """
-    Prunes spurs and small connected components from a 1-pixel binary skeleton.
-
-    Parameters:
-        groove_skeleton: 2D or 3D binary skeleton image (0 and 255 or 0 and 1).
-        min_spur_length: Minimum pixel length for a spur branch connected to a junction.
-                         Branches shorter than this connected to junctions are pruned.
-        min_component_size: Minimum number of total 8-connected skeleton pixels.
-                            Components smaller than this are erased.
-
-    Returns:
-        Pruned binary skeleton image as uint8 np.ndarray with values 0 and 255.
-    """
+    """Remove small components and short endpoint branches; return uint8 values {0,255}."""
     if groove_skeleton is None or groove_skeleton.size == 0:
         return np.zeros((0, 0), dtype=np.uint8) if groove_skeleton is None else np.zeros_like(groove_skeleton, dtype=np.uint8)
-
     if groove_skeleton.ndim == 3:
         groove_skeleton = cv2.cvtColor(groove_skeleton, cv2.COLOR_BGR2GRAY)
-
     skel = (groove_skeleton > 0).astype(np.uint8)
-    if np.count_nonzero(skel) == 0:
+    if not np.any(skel):
         return (skel * 255).astype(np.uint8)
 
-    # Initial pass: remove small disconnected components below min_component_size
-    if min_component_size > 0:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
-        for lbl in range(1, num_labels):
-            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
-                skel[labels == lbl] = 0
+    def remove_small_components(binary):
+        if min_component_size <= 0:
+            return binary
+        count, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+        for label in range(1, count):
+            if stats[label, cv2.CC_STAT_AREA] < min_component_size:
+                binary[labels == label] = 0
+        return binary
 
-    if np.count_nonzero(skel) == 0:
-        return (skel * 255).astype(np.uint8)
-
-    # Iterative spur pruning: remove degree-1 endpoints connected to nearest junction with length < min_spur_length
+    skel = remove_small_components(skel)
     H, W = skel.shape
-    max_iter = 50
 
-    for _ in range(max_iter):
+    def _crossing_number(py: int, px: int) -> int:
+        offsets = [(-1, 0), (-1, 1), (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1)]
+        vals = []
+        for dy, dx in offsets:
+            ny, nx = py + dy, px + dx
+            if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] > 0:
+                vals.append(1)
+            else:
+                vals.append(0)
+        vals.append(vals[0])
+        return sum(1 for i in range(8) if vals[i] == 0 and vals[i+1] == 1)
+
+    # Prune one endpoint branch at a time. The walk stops as soon as the current
+    # path reaches a junction, avoiding trunk nubs.
+    for _ in range(max(H, W)):
         deg = compute_skeleton_neighbor_degrees(skel)
-        endpoints = np.argwhere((deg == 1) & (skel == 1))
-        junction_mask = (deg >= 3) & (skel == 1)
-
-        if len(endpoints) == 0 or not np.any(junction_mask):
+        endpoints = np.argwhere((skel > 0) & (deg == 1))
+        if len(endpoints) == 0:
             break
-
-        to_remove = set()
+        removed_any = False
         for ey, ex in endpoints:
             path = [(int(ey), int(ex))]
-            curr = (int(ey), int(ex))
             prev = None
-            hit_junction = False
-
-            while len(path) <= min_spur_length:
-                nbrs = []
+            curr = (int(ey), int(ex))
+            reached_junction = False
+            while True:
+                neighbours = []
                 for dy, dx in NEIGHBORS_8:
                     ny, nx = curr[0] + dy, curr[1] + dx
-                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] == 1 and (ny, nx) != prev:
-                        nbrs.append((ny, nx))
-
-                if not nbrs:
+                    if 0 <= ny < H and 0 <= nx < W and skel[ny, nx] and (ny, nx) != prev:
+                        neighbours.append((ny, nx))
+                if len(neighbours) != 1:
+                    reached_junction = len(neighbours) >= 2 or _crossing_number(curr[0], curr[1]) >= 3
                     break
-
-                junc_nbrs = [n for n in nbrs if junction_mask[n[0], n[1]]]
-                if junc_nbrs:
-                    hit_junction = True
+                nxt = neighbours[0]
+                if _crossing_number(nxt[0], nxt[1]) >= 3:
+                    reached_junction = True
                     break
-
-                if len(nbrs) > 1:
-                    break
-
-                nxt = nbrs[0]
                 path.append(nxt)
-                prev = curr
-                curr = nxt
-
-            if hit_junction and len(path) < min_spur_length:
-                for p in path:
-                    to_remove.add(p)
-
-        if not to_remove:
+                prev, curr = curr, nxt
+                if len(path) > int(min_spur_length):
+                    break
+            if reached_junction and len(path) <= int(min_spur_length):
+                for py, px in path:
+                    skel[py, px] = 0
+                removed_any = True
+        if not removed_any:
             break
-
-        for py, px in to_remove:
-            skel[py, px] = 0
-
-        # Re-skeletonize to preserve 1-pixel thinness and clean up junction transitions
-        skel = skeletonize(skel > 0).astype(np.uint8)
-
-    # Final pass: remove any components that shrank below min_component_size
-    if min_component_size > 0:
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(skel, connectivity=8)
-        for lbl in range(1, num_labels):
-            if stats[lbl, cv2.CC_STAT_AREA] < min_component_size:
-                skel[labels == lbl] = 0
-
+        skel = remove_small_components(skel)
     return (skel * 255).astype(np.uint8)
+
+
+def extract_minutiae_points(skel, max_points=250, max_search_radius=80):
+    """Return endpoints/junctions ranked by longest incident skeleton branch with bounded fast tracing."""
+    if skel is None or skel.size == 0:
+        return []
+    binary = (np.asarray(skel) > 0).astype(np.uint8)
+    if binary.ndim == 3:
+        binary = cv2.cvtColor(binary, cv2.COLOR_BGR2GRAY)
+        binary = (binary > 0).astype(np.uint8)
+    degrees = compute_skeleton_neighbor_degrees(binary)
+    node_mask = (binary > 0) & ((degrees == 1) | (degrees >= 3))
+    nodes_yx = np.argwhere(node_mask)
+    if len(nodes_yx) == 0:
+        return []
+    H, W = binary.shape
+
+    # Zero-pad binary and node_mask by 1px for fast C-like neighbor lookups without bounds checks
+    pad_bin = np.pad(binary, 1, mode="constant", constant_values=0)
+    pad_node = np.pad(node_mask, 1, mode="constant", constant_values=False)
+    deltas = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
+
+    records = []
+    for yv, xv in nodes_yx:
+        y, x = int(yv), int(xv)
+        deg = degrees[y, x]
+        kind = "endpoint" if deg == 1 else "junction"
+        py, px = y + 1, x + 1
+
+        longest = 0.0
+        best_angle = 0.0
+
+        for dy, dx in deltas:
+            if pad_bin[py + dy, px + dx]:
+                prev_y, prev_x = py, px
+                curr_y, curr_x = py + dy, px + dx
+                branch_len = 1
+                branch_angle = math.degrees(math.atan2(float(dy), float(dx))) % 360.0
+
+                while branch_len < max_search_radius and not pad_node[curr_y, curr_x]:
+                    next_y, next_x = -1, -1
+                    for ddy, ddx in deltas:
+                        ny, nx = curr_y + ddy, curr_x + ddx
+                        if (ny != prev_y or nx != prev_x) and pad_bin[ny, nx]:
+                            if next_y != -1:
+                                # Multiple branches/junction encountered
+                                next_y = -1
+                                break
+                            next_y, next_x = ny, nx
+                    if next_y == -1:
+                        break
+                    prev_y, prev_x = curr_y, curr_x
+                    curr_y, curr_x = next_y, next_x
+                    branch_len += 1
+
+                if branch_len > longest:
+                    longest = float(branch_len)
+                    best_angle = branch_angle
+
+        records.append({
+            "x": float(x),
+            "y": float(y),
+            "type": kind,
+            "angle": best_angle,
+            "weight": longest,
+        })
+    records.sort(key=lambda item: (-item["weight"], item["y"], item["x"]))
+    return records[:max(0, int(max_points))]
+
 
 
 def extract_skeleton_graph(
@@ -338,17 +383,14 @@ def extract_skeleton_graph(
         node_grid[y, x] = nid
         nodes[nid]["pixels"].append((int(y), int(x)))
 
-    # Neighbor lookup helper
-    def get_neighbors(py: int, px: int) -> List[Tuple[int, int]]:
-        nbrs = []
-        for dy, dx in NEIGHBORS_8:
-            ny, nx = py + dy, px + dx
-            if 0 <= ny < H and 0 <= nx < W and skel_binary[ny, nx] == 1:
-                nbrs.append((ny, nx))
-        return nbrs
+    # Zero-pad arrays by 1px for fast neighbor lookups without bounds tests
+    pad_skel = np.pad(skel_binary, 1, mode="constant", constant_values=0)
+    pad_node_grid = np.pad(node_grid, 1, mode="constant", constant_values=-1)
+    visited_path = np.zeros((H + 2, W + 2), dtype=bool)
 
-    visited_path = np.zeros((H, W), dtype=bool)
     branches: List[Dict[str, Any]] = []
+    node_to_branches: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    deltas = ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1))
 
     def compute_and_add_branch(
         u: int,
@@ -360,14 +402,11 @@ def extract_skeleton_graph(
         pos_v = nodes[v]["pos"]
 
         # Arc length: Euclidean distance along path including node centroids
-        arc_len = 0.0
         p0 = path_pixels[0]
-        arc_len += math.hypot(p0[1] - pos_u[0], p0[0] - pos_u[1])
-        for i in range(len(path_pixels) - 1):
-            arc_len += math.hypot(
-                path_pixels[i + 1][1] - path_pixels[i][1],
-                path_pixels[i + 1][0] - path_pixels[i][0]
-            )
+        arc_len = math.hypot(p0[1] - pos_u[0], p0[0] - pos_u[1])
+        if len(path_pixels) > 1:
+            diffs = np.diff(np.array(path_pixels, dtype=np.float32), axis=0)
+            arc_len += float(np.sum(np.hypot(diffs[:, 1], diffs[:, 0])))
         p_last = path_pixels[-1]
         arc_len += math.hypot(pos_v[0] - p_last[1], pos_v[1] - p_last[0])
 
@@ -380,12 +419,12 @@ def extract_skeleton_graph(
             curv = arc_len / max(1.0, chord_len)
             dx = pos_v[0] - pos_u[0]
             dy = pos_v[1] - pos_u[1]
-            orient = float(np.degrees(np.arctan2(dy, dx)))
+            orient = float(math.degrees(math.atan2(dy, dx)))
 
         mid_idx = len(path_pixels) // 2
         mid_y, mid_x = path_pixels[mid_idx]
 
-        branches.append({
+        b_record = {
             "start_node": u,
             "end_node": v,
             "pixel_coords": path_pixels,
@@ -394,104 +433,129 @@ def extract_skeleton_graph(
             "curvature": curv,
             "orientation_deg": orient,
             "midpoint_norm": (float(mid_x / max(1, W)), float(mid_y / max(1, H))),
-        })
+        }
+        branches.append(b_record)
+        node_to_branches[u].append(b_record)
+        if u != v:
+            node_to_branches[v].append(b_record)
 
     # 5. Branch Tracing: Step A (From Endpoints)
     for u in range(endpoint_count):
-        ep_p = nodes[u]["pixels"][0]
-        nbrs = get_neighbors(ep_p[0], ep_p[1])
-        if not nbrs:
+        ey, ex = nodes[u]["pixels"][0]
+        py, px = ey + 1, ex + 1
+        q_pos = None
+        for dy, dx in deltas:
+            if pad_skel[py + dy, px + dx]:
+                q_pos = (py + dy, px + dx)
+                break
+        if q_pos is None:
             continue
-        q = nbrs[0]
-        target_node = int(node_grid[q[0], q[1]])
-        if target_node >= 0:
-            # Direct neighbor between nodes (only add when u <= target_node to avoid duplication)
-            if u <= target_node:
-                compute_and_add_branch(u, target_node, [ep_p, q])
+
+        tgt = pad_node_grid[q_pos[0], q_pos[1]]
+        q_orig = (q_pos[0] - 1, q_pos[1] - 1)
+        if tgt >= 0:
+            if u <= tgt:
+                compute_and_add_branch(u, int(tgt), [(ey, ex), q_orig])
         else:
-            if not visited_path[q[0], q[1]]:
-                path = [ep_p, q]
-                visited_path[q[0], q[1]] = True
-                curr = q
-                prev = ep_p
+            if not visited_path[q_pos[0], q_pos[1]]:
+                visited_path[q_pos[0], q_pos[1]] = True
+                path = [(ey, ex), q_orig]
+                curr_y, curr_x = q_pos
+                prev_y, prev_x = py, px
                 v_node: Optional[int] = None
                 while True:
-                    cur_nbrs = get_neighbors(curr[0], curr[1])
-                    cands = [n for n in cur_nbrs if n != prev]
-                    hit_node = [n for n in cands if node_grid[n[0], n[1]] >= 0]
-                    if hit_node:
-                        end_p = hit_node[0]
-                        v_node = int(node_grid[end_p[0], end_p[1]])
-                        path.append(end_p)
+                    next_y, next_x = -1, -1
+                    hit_tgt = -1
+                    for dy, dx in deltas:
+                        cny, cnx = curr_y + dy, curr_x + dx
+                        if (cny != prev_y or cnx != prev_x) and pad_skel[cny, cnx]:
+                            ng = pad_node_grid[cny, cnx]
+                            if ng >= 0:
+                                hit_tgt = ng
+                                next_y, next_x = cny, cnx
+                                break
+                            elif not visited_path[cny, cnx]:
+                                next_y, next_x = cny, cnx
+                    if hit_tgt >= 0:
+                        path.append((next_y - 1, next_x - 1))
+                        v_node = int(hit_tgt)
                         break
-                    unvis = [n for n in cands if not visited_path[n[0], n[1]]]
-                    if not unvis:
+                    if next_y == -1:
                         break
-                    nxt = unvis[0]
-                    visited_path[nxt[0], nxt[1]] = True
-                    path.append(nxt)
-                    prev = curr
-                    curr = nxt
+                    visited_path[next_y, next_x] = True
+                    path.append((next_y - 1, next_x - 1))
+                    prev_y, prev_x = curr_y, curr_x
+                    curr_y, curr_x = next_y, next_x
                 if v_node is not None:
                     compute_and_add_branch(u, v_node, path)
 
     # 5. Branch Tracing: Step B (From Junctions)
     for u in range(endpoint_count, endpoint_count + junction_count):
-        u_pix_set = set(nodes[u]["pixels"])
-        for p in nodes[u]["pixels"]:
-            for q in get_neighbors(p[0], p[1]):
-                if node_grid[q[0], q[1]] == -1 and not visited_path[q[0], q[1]]:
-                    path = [p, q]
-                    visited_path[q[0], q[1]] = True
-                    curr = q
-                    prev = p
+        u_pix_set = {(p[0] + 1, p[1] + 1) for p in nodes[u]["pixels"]}
+        for ey, ex in nodes[u]["pixels"]:
+            py, px = ey + 1, ex + 1
+            for dy, dx in deltas:
+                qy, qx = py + dy, px + dx
+                if pad_skel[qy, qx] and pad_node_grid[qy, qx] == -1 and not visited_path[qy, qx]:
+                    visited_path[qy, qx] = True
+                    path = [(ey, ex), (qy - 1, qx - 1)]
+                    curr_y, curr_x = qy, qx
+                    prev_y, prev_x = py, px
                     v_node = None
                     while True:
-                        cur_nbrs = get_neighbors(curr[0], curr[1])
-                        cands = [n for n in cur_nbrs if n != prev]
-                        hit_node = [
-                            n for n in cands
-                            if node_grid[n[0], n[1]] >= 0 and not (curr == q and n in u_pix_set)
-                        ]
-                        if hit_node:
-                            end_p = hit_node[0]
-                            v_node = int(node_grid[end_p[0], end_p[1]])
-                            path.append(end_p)
+                        next_y, next_x = -1, -1
+                        hit_tgt = -1
+                        hit_u = False
+                        for ddy, ddx in deltas:
+                            cny, cnx = curr_y + ddy, curr_x + ddx
+                            if (cny != prev_y or cnx != prev_x) and pad_skel[cny, cnx]:
+                                ng = pad_node_grid[cny, cnx]
+                                if ng >= 0 and not (curr_y == qy and curr_x == qx and (cny, cnx) in u_pix_set):
+                                    hit_tgt = ng
+                                    next_y, next_x = cny, cnx
+                                    break
+                                elif not visited_path[cny, cnx] and (cny, cnx) not in u_pix_set:
+                                    next_y, next_x = cny, cnx
+                                elif (cny, cnx) in u_pix_set:
+                                    hit_u = True
+                                    next_y, next_x = cny, cnx
+                        if hit_tgt >= 0:
+                            path.append((next_y - 1, next_x - 1))
+                            v_node = int(hit_tgt)
                             break
-                        unvis = [n for n in cands if not visited_path[n[0], n[1]] and n not in u_pix_set]
-                        if not unvis:
-                            # Check if looped back to u
-                            u_hit = [n for n in cands if n in u_pix_set]
-                            if u_hit:
-                                end_p = u_hit[0]
+                        if next_y == -1:
+                            if hit_u:
+                                path.append((next_y - 1, next_x - 1))
                                 v_node = u
-                                path.append(end_p)
                             break
-                        nxt = unvis[0]
-                        visited_path[nxt[0], nxt[1]] = True
-                        path.append(nxt)
-                        prev = curr
-                        curr = nxt
+                        visited_path[next_y, next_x] = True
+                        path.append((next_y - 1, next_x - 1))
+                        prev_y, prev_x = curr_y, curr_x
+                        curr_y, curr_x = next_y, next_x
                     if v_node is not None:
                         compute_and_add_branch(u, v_node, path)
 
     # 5. Branch Tracing: Step C (Pure closed loops with no endpoints and no junctions)
     skel_pts = np.argwhere(skel_binary == 1)
     for y, x in skel_pts:
-        if node_grid[y, x] == -1 and not visited_path[y, x]:
+        py, px = y + 1, x + 1
+        if pad_node_grid[py, px] == -1 and not visited_path[py, px]:
             loop_p = [(int(y), int(x))]
-            visited_path[y, x] = True
-            curr = (int(y), int(x))
-            prev = None
+            visited_path[py, px] = True
+            curr_y, curr_x = py, px
+            prev_y, prev_x = -1, -1
             while True:
-                nbrs = [n for n in get_neighbors(curr[0], curr[1]) if n != prev]
-                unvis = [n for n in nbrs if not visited_path[n[0], n[1]]]
-                if unvis:
-                    nxt = unvis[0]
-                    visited_path[nxt[0], nxt[1]] = True
-                    loop_p.append(nxt)
-                    prev = curr
-                    curr = nxt
+                next_y, next_x = -1, -1
+                for dy, dx in deltas:
+                    cny, cnx = curr_y + dy, curr_x + dx
+                    if (cny != prev_y or cnx != prev_x) and pad_skel[cny, cnx] and not visited_path[cny, cnx]:
+                        next_y, next_x = cny, cnx
+                        break
+                if next_y != -1:
+                    visited_path[next_y, next_x] = True
+                    loop_p.append((next_y - 1, next_x - 1))
+                    prev_y, prev_x = curr_y, curr_x
+                    curr_y, curr_x = next_y, next_x
                 else:
                     break
 
@@ -508,16 +572,12 @@ def extract_skeleton_graph(
             }
 
             loop_cycle = loop_p + [loop_p[0]]
-            arc_len = 0.0
-            for i in range(len(loop_cycle) - 1):
-                arc_len += math.hypot(
-                    loop_cycle[i + 1][1] - loop_cycle[i][1],
-                    loop_cycle[i + 1][0] - loop_cycle[i][0]
-                )
+            diffs = np.diff(np.array(loop_cycle, dtype=np.float32), axis=0)
+            arc_len = float(np.sum(np.hypot(diffs[:, 1], diffs[:, 0])))
             mid_idx = len(loop_p) // 2
             mid_y, mid_x = loop_p[mid_idx]
 
-            branches.append({
+            b_record = {
                 "start_node": loop_id,
                 "end_node": loop_id,
                 "pixel_coords": loop_cycle,
@@ -526,13 +586,15 @@ def extract_skeleton_graph(
                 "curvature": arc_len,
                 "orientation_deg": 0.0,
                 "midpoint_norm": (float(mid_x / max(1, W)), float(mid_y / max(1, H))),
-            })
+            }
+            branches.append(b_record)
+            node_to_branches[loop_id].append(b_record)
 
-    # Minutiae orientation for nodes
+    # Minutiae orientation for nodes using fast node_to_branches lookup (O(1))
     for nid, ndata in nodes.items():
         ntype = ndata["type"]
         pos = ndata["pos"]
-        node_branches = [b for b in branches if b["start_node"] == nid or b["end_node"] == nid]
+        node_branches = node_to_branches[nid]
 
         if ntype == "endpoint":
             if node_branches:
@@ -546,7 +608,7 @@ def extract_skeleton_graph(
                     target_p = coords[k]
                 dx = target_p[1] - pos[0]
                 dy = target_p[0] - pos[1]
-                orient = float(np.degrees(np.arctan2(dy, dx))) if (abs(dx) > 1e-4 or abs(dy) > 1e-4) else 0.0
+                orient = float(math.degrees(math.atan2(dy, dx))) if (abs(dx) > 1e-4 or abs(dy) > 1e-4) else 0.0
             else:
                 orient = 0.0
             ndata["orientation"] = round(orient, 2)
@@ -566,7 +628,7 @@ def extract_skeleton_graph(
                     dx = target_p[1] - pos[0]
                     dy = target_p[0] - pos[1]
                     if abs(dx) > 1e-4 or abs(dy) > 1e-4:
-                        ang = float(np.degrees(np.arctan2(dy, dx)))
+                        ang = float(math.degrees(math.atan2(dy, dx)))
                         out_angles.append(ang)
                         out_lens.append(b["arc_length"])
 

@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Auto-configure LD_LIBRARY_PATH for NVIDIA CUDA 11 / cuDNN in .venv
-if os.environ.get("MRCNN_NVIDIA_CONFIGURED") != "1":
+if os.environ.get("MRCNN_NVIDIA_CONFIGURED") != "1" and sys.argv and sys.argv[0] not in ("-c", "") and not sys.argv[0].endswith("pytest"):
     SCRIPT_DIR_EARLY = Path(__file__).resolve().parent
     venv_nvidia = SCRIPT_DIR_EARLY / ".venv" / "lib" / "python3.8" / "site-packages" / "nvidia"
     if venv_nvidia.is_dir():

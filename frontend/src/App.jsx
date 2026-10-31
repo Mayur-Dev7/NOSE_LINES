@@ -3,7 +3,9 @@ import GrooveStudioTab from './GrooveStudioTab';
 import GrooveTuningSection from './GrooveTuningSection';
 import MultiImageTemplateBuilder from './MultiImageTemplateBuilder';
 import TwoVideoCosineMatcher from './TwoVideoCosineMatcher';
+import SingleVideoEmbeddingMatcher from './SingleVideoEmbeddingMatcher';
 import {
+  Search,
   Cpu,
   Zap,
   Play,
@@ -518,43 +520,45 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
       {/* Top Header */}
-      <header className="border-b border-slate-800 bg-slate-900/70 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
+      <header className="border-b border-white/[0.08] bg-slate-950/80 backdrop-blur-2xl sticky top-0 z-50 px-6 py-3.5 transition-all">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 text-xl">
-              <ScanLine className="w-6 h-6 text-slate-950" />
+          <div className="flex items-center space-x-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
+              <ScanLine className="w-5 h-5 text-slate-950" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold tracking-tight text-white">
-                  Cattle Muzzle Groove Extraction &amp; Ridge Skeletonization
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
+                  Bovine Biometric Studio
                 </h1>
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
-                  nose_lines Pipeline
+                <span className="text-[10px] font-semibold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 font-mono shadow-xs">
+                  ConvNeXt ArcFace &bull; GeM 512-D
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Multi-Scale Morphological Black-Hat &amp; Frangi Filtering • Binary Groove Segmentation • 1-px Topological Ridge Skeletonization
+              <p className="text-[11px] text-slate-400 font-normal mt-0.5">
+                5-Frame Temporal Muzzle Pooling &bull; Epidermal Dermatoglyphic Ridge Skeletonization &bull; 10-D Minutiae Topology
               </p>
             </div>
           </div>
 
           {/* System Hardware Status Badges */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             {status?.hardware?.gpu_available ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 <Zap className="w-3.5 h-3.5 text-emerald-400" />
                 <span>GPU: {status.hardware.gpu_name}</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-950/60 border border-amber-500/30 text-amber-300 text-xs font-medium">
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
                 <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                <span>GPU Not Available</span>
+                <span>GPU Standby</span>
               </div>
             )}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/80 border border-slate-700 text-slate-300 text-xs font-medium">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-slate-300 text-xs font-medium backdrop-blur-md">
               <Cpu className="w-3.5 h-3.5 text-sky-400" />
-              <span>CPU: {status?.hardware?.cpu_threads || 12} Threads</span>
+              <span>{status?.hardware?.cpu_threads || 12} Threads</span>
             </div>
           </div>
         </div>
@@ -562,105 +566,113 @@ export default function App() {
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto w-full p-6 flex-1 flex flex-col gap-6">
-        {/* Navigation Tabs */}
-        <div className="flex flex-wrap items-center justify-between border-b border-slate-800 pb-3 gap-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Primary Default Tab: 2-Video Cosine Matcher (nose_lines LocalStorage) */}
+        {/* Navigation Tabs - macOS style segmented dock */}
+        <div className="flex flex-wrap items-center justify-between border-b border-white/[0.08] pb-3 gap-3">
+          <div className="flex flex-wrap items-center p-1 bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/[0.06] gap-1 shadow-inner">
+            {/* Primary Default Tab: 2-Video Cosine Matcher (Flagship) */}
             <button
               onClick={() => setActiveTab('two_video_cosine')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'two_video_cosine'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/25 ring-1 ring-emerald-400'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <GitCompare className="w-4 h-4" />
-              <span>2-Video Cosine Matcher</span>
-              <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                activeTab === 'two_video_cosine' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              <GitCompare className="w-3.5 h-3.5 text-emerald-400" />
+              <span>2-Video Biometric Matcher</span>
+              <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
+                activeTab === 'two_video_cosine' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/[0.05] text-slate-400'
               }`}>
-                5-Images &bull; LocalStorage
+                Flagship
+              </span>
+            </button>
+
+            {/* Tab: 1-to-N Cattle Search & Embedder */}
+            <button
+              onClick={() => setActiveTab('one_to_n')}
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                activeTab === 'one_to_n'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+              }`}
+            >
+              <Search className="w-3.5 h-3.5 text-indigo-400" />
+              <span>1-to-N Cattle Search & Embedder</span>
+              <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
+                activeTab === 'one_to_n' ? 'bg-indigo-500/25 text-indigo-300' : 'bg-white/[0.05] text-indigo-400'
+              }`}>
+                New
               </span>
             </button>
 
             {/* Groove Extraction Studio (nose_lines) */}
             <button
               onClick={() => setActiveTab('groove_studio')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'groove_studio'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/25 ring-1 ring-emerald-400'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <ScanLine className="w-4 h-4" />
-              <span>Muzzle Groove &amp; Skeleton Studio</span>
-              <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                activeTab === 'groove_studio' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
-              }`}>
-                nose_lines
-              </span>
+              <ScanLine className="w-3.5 h-3.5 text-teal-400" />
+              <span>Ridge Skeleton Studio</span>
             </button>
 
             {/* Tab: Multi-Image Reference Builder */}
             <button
               onClick={() => setActiveTab('multi_template')}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'multi_template'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-lg shadow-emerald-500/25 ring-1 ring-emerald-400'
-                  : 'text-slate-300 hover:text-white hover:bg-slate-900 border border-transparent'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <Layers className="w-4 h-4" />
-              <span>Multi-Image Reference Builder</span>
-              <span className={`text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
-                activeTab === 'multi_template' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
-              }`}>
-                5-Image Consensus
-              </span>
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Consensus Template Builder</span>
             </button>
 
-            {/* Tab 2: 2-Video Comparison */}
+            {/* Tab 2: 2-Video Comparison (Legacy) */}
             <button
               onClick={() => setActiveTab('two_video')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeTab === 'two_video'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <GitCompare className="w-4 h-4" />
-              <span>2-Video Biometric Matcher</span>
+              <GitCompare className="w-3.5 h-3.5" />
+              <span>Frame Matcher</span>
             </button>
 
             {/* Tab 3: Single-Video Frame Extraction */}
             <button
               onClick={() => setActiveTab('viewer')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeTab === 'viewer'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <Activity className="w-4 h-4" />
-              Single-Video Frame Cropper
+              <Activity className="w-3.5 h-3.5" />
+              <span>Frame Cropper</span>
             </button>
 
             {/* Tab 4: Hardware Benchmark */}
             <button
               onClick={() => setActiveTab('benchmark')}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
+              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
                 activeTab === 'benchmark'
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
               }`}
             >
-              <BarChart3 className="w-4 h-4" />
-              Hardware Benchmark
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Benchmark</span>
             </button>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
             Weights: <code className="text-slate-300">crop11dec.h5 ({status?.weights_size_mb || 245} MB)</code>
           </div>
         </div>
@@ -670,6 +682,13 @@ export default function App() {
         {/* ========================================================= */}
         {activeTab === 'two_video_cosine' && (
           <TwoVideoCosineMatcher sampleVideos={status?.sample_videos || []} />
+        )}
+
+        {/* ========================================================= */}
+        {/* TAB: 1-TO-N CATTLE BIOMETRIC SEARCH & EMBEDDER            */}
+        {/* ========================================================= */}
+        {activeTab === 'one_to_n' && (
+          <SingleVideoEmbeddingMatcher sampleVideos={status?.sample_videos || []} />
         )}
 
         {/* ========================================================= */}

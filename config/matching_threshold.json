@@ -1,0 +1,8 @@
+{
+  "calibrated": false,
+  "status": "UNCALIBRATED",
+  "threshold": null,
+  "reason": "No qualifying held-out calibration set; calibration requires at least 30 genuine and 30 impostor pairs.",
+  "genuine_pairs": 0,
+  "impostor_pairs": 0
+}
