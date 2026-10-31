@@ -141,6 +141,8 @@ def configure_hardware(device: str = "auto", cpu_cores: Optional[int] = None, lo
         import ctypes, glob
         site_packages = os.path.join(os.path.dirname(__file__), ".venv", "lib", "python3.8", "site-packages")
         for so_file in sorted(glob.glob(os.path.join(site_packages, "nvidia", "*", "lib", "*.so*"))):
+            if "libnvblas" in os.path.basename(so_file):
+                continue  # Skip NVBLAS to prevent CPU BLAS interception failures
             try:
                 ctypes.CDLL(so_file, mode=ctypes.RTLD_GLOBAL)
             except Exception:

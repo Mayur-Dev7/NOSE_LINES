@@ -88,10 +88,15 @@ def configure_hardware_environment(device: str = "cpu", cpu_cores: int = 6) -> s
     dev_lower = str(device or "cpu").lower()
 
     # Preload NVIDIA CUDA 11 runtime into global process space
+    # IMPORTANT: Skip libnvblas.so — it intercepts CPU BLAS calls (sgemm) and
+    # routes them to GPU, which fails without an nvblas.conf and produces NaN/Inf
+    # values that crash JSON serialization when device=cpu is selected.
     try:
         import ctypes, glob
         site_packages = os.path.join(os.path.dirname(__file__), ".venv", "lib", "python3.8", "site-packages")
         for so_file in sorted(glob.glob(os.path.join(site_packages, "nvidia", "*", "lib", "*.so*"))):
+            if "libnvblas" in os.path.basename(so_file):
+                continue  # Skip NVBLAS to prevent CPU BLAS interception failures
             try:
                 ctypes.CDLL(so_file, mode=ctypes.RTLD_GLOBAL)
             except Exception:

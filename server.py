@@ -17,6 +17,7 @@ import sys
 os.environ["MRCNN_NVIDIA_CONFIGURED"] = "1"
 import glob
 import json
+import math
 import time
 import shutil
 import asyncio
@@ -29,10 +30,14 @@ from typing import Optional, List, Any, Dict, Union
 import logging
 
 # Preload NVIDIA CUDA 11 runtime libraries into global process space so TensorFlow finds GPU:0
+# IMPORTANT: Skip libnvblas.so — it intercepts CPU BLAS calls (sgemm) and routes them to GPU,
+# which fails without nvblas.conf and produces NaN/Inf values crashing JSON serialization.
 try:
     import ctypes
     site_packages = os.path.join(os.path.dirname(__file__), ".venv", "lib", "python3.8", "site-packages")
     for so_file in sorted(glob.glob(os.path.join(site_packages, "nvidia", "*", "lib", "*.so*"))):
+        if "libnvblas" in os.path.basename(so_file):
+            continue  # Skip NVBLAS to prevent CPU BLAS interception failures
         try:
             ctypes.CDLL(so_file, mode=ctypes.RTLD_GLOBAL)
         except Exception:
@@ -1054,8 +1059,29 @@ _EXTRACTION_LOCK = asyncio.Lock()
 _EXTRACTION_CACHE = OrderedDict()
 _EXTRACTION_CACHE_MAX = 8
 
+def _sanitize_floats(obj):
+    """Recursively replace NaN/Inf float values with 0.0 so JSON serialization never fails."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    if isinstance(obj, dict):
+        return {k: _sanitize_floats(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_floats(v) for v in obj]
+    if isinstance(obj, np.floating):
+        val = float(obj)
+        if math.isnan(val) or math.isinf(val):
+            return 0.0
+        return val
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.ndarray):
+        return None  # Strip arrays
+    return obj
+
 def _json_safe_frame(frame):
-    return {k: v for k, v in frame.items() if not isinstance(v, np.ndarray)}
+    return _sanitize_floats({k: v for k, v in frame.items() if not isinstance(v, np.ndarray)})
 
 
 def _spatial_cache_key(video_path, method, threshold_method, adaptive_block_size, adaptive_c,
@@ -1160,7 +1186,7 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
         _put_extraction_cache(cache_key, res.get("frames") or [])
         safe = dict(res)
         safe["frames"] = [_json_safe_frame(frame) for frame in (res.get("frames") or [])]
-        return safe
+        return _sanitize_floats(safe)
     except HTTPException:
         raise
     except Exception as exc:
