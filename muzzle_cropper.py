@@ -35,6 +35,9 @@ if os.environ.get("MRCNN_NVIDIA_CONFIGURED") != "1" and sys.argv and sys.argv[0]
                 env["MRCNN_NVIDIA_CONFIGURED"] = "1"
                 os.execve(sys.executable, [sys.executable, sys.argv[0]] + sys.argv[1:], env)
 
+# Enable oneDNN optimizations for accelerated CPU inference
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
+
 # Early CPU affinity & thread allocation before OpenMP / TensorFlow C++ engines initialize
 if "--cpu-cores" in sys.argv:
     try:
@@ -133,6 +136,12 @@ def configure_hardware(device: str = "auto", cpu_cores: Optional[int] = None, lo
         except Exception:
             pass
 
+        try:
+            import torch
+            torch.set_num_threads(eff_cores)
+        except Exception:
+            pass
+
         if logger:
             logger.info(f"[Hardware] CPU thread count optimized to: {eff_cores} worker threads (avoids hyperthread thrashing)")
             pass
@@ -223,6 +232,7 @@ class CowMuzzleInferenceConfig(Config):
     NUM_CLASSES = 1 + 1  # 1 background + 1 cow muzzle
     DETECTION_MIN_CONFIDENCE = 0.70
     DETECTION_NMS_THRESHOLD = 0.30
+    DETECTION_MAX_INSTANCES = 10
     IMAGE_MIN_DIM = 800
     IMAGE_MAX_DIM = 1024
     IMAGE_RESIZE_MODE = "square"
@@ -257,17 +267,36 @@ class MuzzleDetectionPipeline:
         self.config = CowMuzzleInferenceConfig()
         self.config.DETECTION_MIN_CONFIDENCE = confidence_threshold
 
-        # Optimization:
-        # High-throughput 640x640 resolution with 50 ROIs gives 2.5x speedup with exact bounding box accuracy
+        # Optimization 6:
+        # High-throughput 640x640 resolution with 50 ROIs and 10 max detections
         self.config.IMAGE_MIN_DIM = 640
         self.config.IMAGE_MAX_DIM = 640
         self.config.POST_NMS_ROIS_INFERENCE = 50
+        self.config.DETECTION_MAX_INSTANCES = 10
 
         is_gpu = ("gpu" in self.device_desc.lower())
         if is_gpu:
             self.logger.info("[Optimization] GPU Engine active: 640x640 resolution, 50 ROIs (real-time ~60ms)")
         else:
-            self.logger.info(f"[Optimization] CPU Engine active: 640x640 resolution, 50 ROIs (Optimized for {cpu_cores or 'all'} cores, ~180ms)")
+            self.logger.info(f"[Optimization] CPU Engine active: 640x640 resolution, 50 ROIs, max_instances=10 (Optimized for {cpu_cores or 'all'} cores, ~180ms)")
+
+        eff_cores = min(cpu_cores, 6) if (cpu_cores and cpu_cores > 0) else 6
+        inter_cores = min(eff_cores, 2)
+        import tensorflow.compat.v1 as tf
+        self.graph = tf.get_default_graph()
+        tf_config = tf.ConfigProto(
+            intra_op_parallelism_threads=eff_cores,
+            inter_op_parallelism_threads=inter_cores,
+        )
+        if not is_gpu:
+            tf_config.device_count["GPU"] = 0
+        try:
+            tf.keras.backend.set_learning_phase(0)
+            self.session = tf.Session(config=tf_config, graph=self.graph)
+            tf.keras.backend.set_session(self.session)
+        except Exception:
+            self.session = tf.keras.backend.get_session()
+        self.lock = threading.Lock()
 
         t0 = time.perf_counter()
         self.logger.info(f"Loading Mask R-CNN inference model with weights from: {self.weights_path}...")
@@ -279,15 +308,6 @@ class MuzzleDetectionPipeline:
         self.model.load_weights(self.weights_path, by_name=True)
         t_load = (time.perf_counter() - t0) * 1000
         self.logger.info(f"Model successfully loaded and initialized in {t_load:.1f} ms")
-
-        # Retain graph & session for thread-safe cross-thread execution
-        import tensorflow.compat.v1 as tf
-        self.graph = tf.get_default_graph()
-        try:
-            self.session = tf.keras.backend.get_session()
-        except Exception:
-            self.session = tf.Session(graph=self.graph)
-        self.lock = threading.Lock()
 
     def process_image(
         self,

@@ -15,6 +15,8 @@ import sys
 
 # Prevent muzzle_cropper from re-executing server process via execve
 os.environ["MRCNN_NVIDIA_CONFIGURED"] = "1"
+# Enable oneDNN optimizations for accelerated CPU inference
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
 import glob
 import json
 import math
@@ -80,6 +82,14 @@ if not hasattr(asyncio, "to_thread"):
 
 import cv2
 import numpy as np
+
+# Thread and runtime hygiene settings
+try:
+    cv2.setNumThreads(1)
+    import torch
+    torch.set_num_threads(6)
+except Exception:
+    pass
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -390,6 +400,7 @@ async def stream_video(
         cmd.extend(["--cpu-cores", str(parsed_cores)])
         env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
         env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTEROP_THREADS"] = str(min(parsed_cores, 2))
         env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
         env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
 
@@ -444,6 +455,7 @@ async def stream_image(
         cmd.extend(["--cpu-cores", str(parsed_cores)])
         env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
         env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTEROP_THREADS"] = str(min(parsed_cores, 2))
         env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
         env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
 
@@ -545,6 +557,7 @@ async def stream_compare_videos(
         cmd.extend(["--cpu-cores", str(parsed_cores)])
         env_extra["OMP_NUM_THREADS"] = str(parsed_cores)
         env_extra["TF_NUM_INTRAOP_THREADS"] = str(parsed_cores)
+        env_extra["TF_NUM_INTEROP_THREADS"] = str(min(parsed_cores, 2))
         env_extra["MKL_NUM_THREADS"] = str(parsed_cores)
         env_extra["OPENBLAS_NUM_THREADS"] = str(parsed_cores)
 

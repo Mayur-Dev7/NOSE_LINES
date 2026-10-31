@@ -31,8 +31,8 @@ from server import resolve_video_path
 
 def compute_iou_boxes(box1, box2):
     """Computes Intersection-over-Union between two bounding boxes [y1, x1, y2, x2]."""
-    if not box1 or not box2 or len(box1) != 4 or len(box2) != 4:
-        return 1.0 if box1 == box2 else 0.0
+    if box1 is None or box2 is None or len(box1) != 4 or len(box2) != 4:
+        return 1.0 if (box1 is None and box2 is None) else 0.0
     y1 = max(box1[0], box2[0])
     x1 = max(box1[1], box2[1])
     y2 = min(box1[2], box2[2])
