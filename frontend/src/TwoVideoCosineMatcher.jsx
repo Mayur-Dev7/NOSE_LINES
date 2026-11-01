@@ -210,6 +210,23 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     };
 
     try {
+      const parseJsonResponse = async (res, stepName) => {
+        const text = await res.text();
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          if (!res.ok) {
+            throw new Error(`${stepName} failed (HTTP ${res.status}): ${text.slice(0, 150) || res.statusText}`);
+          }
+          throw new Error(`${stepName} returned invalid non-JSON response: ${text.slice(0, 150)}`);
+        }
+        if (!res.ok) {
+          throw new Error(data.detail || `${stepName} failed with HTTP ${res.status}`);
+        }
+        return data;
+      };
+
       // Step 1: Video A extraction
       setTimelineStep(1);
       setProgressStep(1);
@@ -222,7 +239,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           ...extractionConfig,
         }),
       });
-      const extractedA = await resA.json();
+      const extractedA = await parseJsonResponse(resA, 'Video A extraction');
       if (!extractedA.success) {
         throw new Error(extractedA.detail || 'Muzzle detection/extraction failed for Video A');
       }
@@ -241,7 +258,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           ...extractionConfig,
         }),
       });
-      const extractedB = await resB.json();
+      const extractedB = await parseJsonResponse(resB, 'Video B extraction');
       if (!extractedB.success) {
         throw new Error(extractedB.detail || 'Muzzle detection/extraction failed for Video B');
       }
@@ -273,7 +290,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           cpu_cores: cpuCores,
         }),
       });
-      const simData = await resSim.json();
+      const simData = await parseJsonResponse(resSim, 'Biometric consensus calculation');
 
       clearInterval(timerInterval);
       const wallClockElapsed = Number(((performance.now() - startWallClock) / 1000).toFixed(2));

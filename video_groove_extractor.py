@@ -873,6 +873,8 @@ def _extract_stages_1_and_2(
             "min_spur_length": min_spur_length,
             "min_component_size": min_component_size,
             "max_minutiae_points": int(matcher_params.get("max_minutiae_points", 250)),
+            "enable_dl_embedding": enable_dl_embedding,
+            "dl_input_mode": dl_input_mode,
         })
 
     return {
@@ -1008,17 +1010,24 @@ def _complete_stages_after_pool(
         # Step 6: Prepare tensor for batched ConvNeXt latent inference
         if dl_model is not None:
             try:
-                from dl_muzzle_embedder import prepare_input_tensor
-                raw_t = prepare_input_tensor(
-                    clahe_gray=matcher_gray,
-                    groove_response=groove_response,
-                    skeleton=pruned_skeleton,
-                    mask=matcher_mask,
-                    input_mode=dl_input_mode,
-                    device="cpu",
-                )
-                dl_frame_tensors.append(raw_t.squeeze(0).cpu().numpy())
-                dl_pending_tensors.append(raw_t)
+                import torch
+                if w_res.get("dl_tensor") is not None:
+                    raw_arr = w_res["dl_tensor"]
+                    raw_t = torch.from_numpy(raw_arr).unsqueeze(0)
+                    dl_frame_tensors.append(raw_arr)
+                    dl_pending_tensors.append(raw_t)
+                else:
+                    from dl_muzzle_embedder import prepare_input_tensor
+                    raw_t = prepare_input_tensor(
+                        clahe_gray=matcher_gray,
+                        groove_response=groove_response,
+                        skeleton=pruned_skeleton,
+                        mask=matcher_mask,
+                        input_mode=dl_input_mode,
+                        device="cpu",
+                    )
+                    dl_frame_tensors.append(raw_t.squeeze(0).cpu().numpy())
+                    dl_pending_tensors.append(raw_t)
                 dl_confidences.append(float(conf))
                 dl_blur_variances.append(float(lap_var))
             except Exception as e:
@@ -1131,6 +1140,8 @@ def _complete_stages_after_pool(
 
     t_total_ms = (time.perf_counter() - t_start_total) * 1000.0
 
+    t_steps_3_5_wall_ms = float(ctx.get("t_steps_3_5_wall_ms") or (t_canonical_clahe_ms + t_groove_extract_ms + t_skeleton_minutiae_ms))
+
     # Step timings dictionary with exact requested keys and backward compatibility
     step_timings = {
         "t_sampling_ms": round(float(t_sampling_ms), 2),
@@ -1138,6 +1149,7 @@ def _complete_stages_after_pool(
         "t_canonical_clahe_ms": round(float(t_canonical_clahe_ms), 2),
         "t_groove_extract_ms": round(float(t_groove_extract_ms), 2),
         "t_skeleton_minutiae_ms": round(float(t_skeleton_minutiae_ms), 2),
+        "t_steps_3_5_wall_ms": round(t_steps_3_5_wall_ms, 2),
         "t_dl_inference_ms": round(float(t_dl_inference_ms), 2),
         "t_total_ms": round(float(t_total_ms), 2),
         "device_used": device_used,
@@ -1234,6 +1246,7 @@ def extract_five_muzzle_stages(
         enable_dl_embedding=enable_dl_embedding,
     )
 
+    t_start_pool = time.perf_counter()
     pool_size = 2 if cpu_cores == 2 else min(get_physical_cores(), 6)
     worker_results: Optional[List[Dict[str, Any]]] = None
 
@@ -1245,6 +1258,7 @@ def extract_five_muzzle_stages(
         _log_telemetry(fallback_msg)
         worker_results = [process_frame_stages_3_5(t) for t in ctx["tasks"]]
 
+    ctx["t_steps_3_5_wall_ms"] = (time.perf_counter() - t_start_pool) * 1000.0
     return _complete_stages_after_pool(ctx, worker_results)
 
 

@@ -17,6 +17,16 @@ Strict constraints:
 
 import os
 import sys
+
+# CRITICAL: Set single-thread affinity in environment variables BEFORE importing
+# any C/C++ accelerated math libraries (numpy, cv2, scipy, skimage, openblas, mkl).
+# OpenMP, MKL, and OpenBLAS runtimes lock their threadpools at shared object load time.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import math
 import time
 from pathlib import Path
@@ -29,6 +39,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import cv2
+try:
+    cv2.setNumThreads(1)
+except Exception:
+    pass
+
 import numpy as np
 import skimage.filters
 import skimage.morphology
@@ -44,10 +59,15 @@ from groove_graph import (
 
 def worker_init():
     """Initializes worker process with strictly single-threaded math libraries."""
-    cv2.setNumThreads(1)
+    try:
+        cv2.setNumThreads(1)
+    except Exception:
+        pass
     os.environ["OMP_NUM_THREADS"] = "1"
     os.environ["OPENBLAS_NUM_THREADS"] = "1"
     os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
 
 def get_physical_cores() -> int:
@@ -302,6 +322,39 @@ def process_frame_stages_3_5(task: Dict[str, Any]) -> Dict[str, Any]:
     matcher_gray = enhanced_gray.copy()
     t_step5_ms = (time.perf_counter() - t_step5_start) * 1000.0
 
+    # Step 6 Precomputation: Assemble normalized (3, 224, 224) float32 composite tensor array in worker
+    dl_tensor_np = None
+    if task.get("enable_dl_embedding", True):
+        target_size = (224, 224)
+        h, w = target_size
+        g_clahe = cv2.resize(enhanced_gray, (w, h), interpolation=cv2.INTER_LANCZOS4)
+        g_groove = cv2.resize(groove_response, (w, h), interpolation=cv2.INTER_LANCZOS4)
+        g_skel = cv2.resize(pruned_skeleton, (w, h), interpolation=cv2.INTER_NEAREST)
+
+        if matcher_mask is not None and matcher_mask.size > 0:
+            m_224 = cv2.resize(matcher_mask, (w, h), interpolation=cv2.INTER_NEAREST) > 0
+            g_clahe[~m_224] = 0
+            g_groove[~m_224] = 0
+            g_skel[~m_224] = 0
+
+        dilate_k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        skel_dilated = cv2.dilate(g_skel, dilate_k, iterations=1)
+
+        input_mode = (task.get("dl_input_mode") or "composite_3ch").lower()
+        if input_mode == "skeleton_only":
+            skel_smooth = cv2.GaussianBlur(skel_dilated, (3, 3), sigmaX=1.0)
+            ch0, ch1, ch2 = skel_smooth, skel_smooth, skel_smooth
+        elif input_mode == "groove_map":
+            ch0, ch1, ch2 = g_groove, g_groove, g_groove
+        else:  # default 'composite_3ch'
+            ch0, ch1, ch2 = g_clahe, g_groove, skel_dilated
+
+        stacked = np.stack([ch0, ch1, ch2], axis=-1).astype(np.float32) / 255.0
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        normed = (stacked - mean) / std
+        dl_tensor_np = np.ascontiguousarray(normed.transpose(2, 0, 1), dtype=np.float32)
+
     return {
         "frame_idx": f_idx,
         "confidence": task.get("confidence", 0.0),
@@ -323,6 +376,7 @@ def process_frame_stages_3_5(task: Dict[str, Any]) -> Dict[str, Any]:
         "matcher_gray": matcher_gray,
         "matcher_mask": matcher_mask,
         "matcher_skeleton": matcher_skeleton,
+        "dl_tensor": dl_tensor_np,
         "t_step3_ms": t_step3_ms,
         "t_step4_ms": t_step4_ms,
         "t_step5_ms": t_step5_ms,

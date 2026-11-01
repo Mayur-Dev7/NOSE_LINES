@@ -290,6 +290,7 @@ class MuzzleDetectionPipeline:
         )
         if not is_gpu:
             tf_config.device_count["GPU"] = 0
+            tf_config.use_per_session_threads = True
         try:
             tf.keras.backend.set_learning_phase(0)
             self.session = tf.Session(config=tf_config, graph=self.graph)
@@ -365,9 +366,12 @@ class MuzzleDetectionPipeline:
 
                     # Step 3: Neural network forward inference
                     t0 = time.perf_counter()
-                    # Compute anchors
-                    anchors = self.model.get_anchors(molded_image_shape)
-                    anchors = np.broadcast_to(anchors, (self.config.BATCH_SIZE,) + anchors.shape)
+                    # Compute anchors (cached for standard 640x640 shape)
+                    if not hasattr(self, "_cached_anchors") or getattr(self, "_cached_anchors_shape", None) != molded_image_shape:
+                        anchors = self.model.get_anchors(molded_image_shape)
+                        self._cached_anchors = np.broadcast_to(anchors, (self.config.BATCH_SIZE,) + anchors.shape)
+                        self._cached_anchors_shape = molded_image_shape
+                    anchors = self._cached_anchors
                     
                     # Run detection forward pass
                     detections, _, _, mrcnn_mask, _, _, _ = self.model.keras_model.predict(
