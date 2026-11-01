@@ -21,7 +21,8 @@ import {
   Layers,
   RotateCcw,
   Check,
-  Maximize2
+  Maximize2,
+  SlidersHorizontal
 } from 'lucide-react';
 
 const FEATURE_LABELS = {
@@ -84,6 +85,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
   // Primary metric driver: 'mean' (Outlier-Pruned Mean) or 'median' (5-Frame Median)
   const [primaryMetric, setPrimaryMetric] = useState('mean');
+
+  // Match confidence decision threshold (Default: 70.0% for balanced bovine verification)
+  const [matchThreshold, setMatchThreshold] = useState(70.0);
 
   // Execution & Progress state
   const [processing, setProcessing] = useState(false);
@@ -286,6 +290,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           dl_emb_b: dlEmbB,
           per_frames_a: perFramesA,
           per_frames_b: perFramesB,
+          dl_match_threshold: matchThreshold,
+          dl_likely_threshold: Number((matchThreshold - 12.0).toFixed(1)),
           device: computeDevice,
           cpu_cores: cpuCores,
         }),
@@ -425,12 +431,18 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   // Active Metric Driver based on user toggle
   const activeSim = primaryMetric === 'mean' ? (meanSim ?? 0) : medianSim;
   const activeL2 = primaryMetric === 'mean' ? (meanL2 ?? 0) : medianL2;
+  const rawSim = primaryMetric === 'mean'
+    ? (matchResult?.raw_mean_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct)
+    : (matchResult?.raw_median_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct);
 
-  // 4-Tier Biometric Status Badges (Apple Design System)
-  const isMatch = activeSim >= 85.0;
-  const isLikely = activeSim >= 78.0 && activeSim < 85.0;
-  const isInconclusive = activeSim >= 65.0 && activeSim < 78.0;
-  const isDistinct = activeSim < 65.0;
+  // 4-Tier Biometric Status Badges (Apple Design System) with dynamic thresholding
+  const likelyThreshold = Number((matchThreshold - 12.0).toFixed(1)); // e.g. 58% when match is 70%
+  const inconclusiveThreshold = Number((matchThreshold - 22.0).toFixed(1)); // e.g. 48% when match is 70%
+
+  const isMatch = activeSim >= matchThreshold;
+  const isLikely = activeSim >= likelyThreshold && activeSim < matchThreshold;
+  const isInconclusive = activeSim >= inconclusiveThreshold && activeSim < likelyThreshold;
+  const isDistinct = activeSim < inconclusiveThreshold;
 
   return (
     <div className="flex flex-col gap-6 text-slate-100 max-w-5xl mx-auto w-full pb-20">
@@ -874,10 +886,79 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               
               <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
                 <span>L2 Distance: <strong className="text-slate-200">{activeL2}</strong></span>
+                {rawSim != null && (
+                  <>
+                    <span>&bull;</span>
+                    <span>Raw Cosine: <strong className="text-slate-300">{Number(rawSim).toFixed(1)}%</strong></span>
+                  </>
+                )}
                 <span>&bull;</span>
                 <span className="text-slate-400 font-sans">
                   {primaryMetric === 'mean' ? 'Outlier-Pruned Mean' : '5-Frame Median'}
                 </span>
+              </div>
+            </div>
+          </div>
+
+          {/* DYNAMIC CONFIDENCE THRESHOLD CONTROLLER */}
+          <div className="backdrop-blur-xl bg-slate-900/60 border border-white/[0.08] px-5 py-3.5 rounded-3xl flex items-center justify-between gap-4 flex-wrap shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+                <SlidersHorizontal className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-semibold text-white tracking-wide">Confidence Decision Threshold:</span>
+                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    &ge; {matchThreshold}% Match
+                  </span>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    (Likely: &ge; {likelyThreshold}%, Inconclusive: &ge; {inconclusiveThreshold}%)
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Dynamically adjust matching sensitivity across varied pasture lighting, camera angles, and distance.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 ml-auto flex-wrap">
+              {/* Slider */}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-slate-500">50%</span>
+                <input
+                  type="range"
+                  min="50"
+                  max="85"
+                  step="1"
+                  value={matchThreshold}
+                  onChange={(e) => setMatchThreshold(Number(e.target.value))}
+                  className="w-28 sm:w-36 accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
+                  title={`Adjust match threshold (currently ${matchThreshold}%)`}
+                />
+                <span className="text-[10px] font-mono text-slate-500">85%</span>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-xl border border-white/[0.08]">
+                {[
+                  { label: 'Relaxed (60%)', val: 60 },
+                  { label: 'Balanced (70%)', val: 70 },
+                  { label: 'Strict (80%)', val: 80 },
+                ].map((p) => (
+                  <button
+                    key={p.val}
+                    type="button"
+                    onClick={() => setMatchThreshold(p.val)}
+                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
+                      matchThreshold === p.val
+                        ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 shadow-xs'
+                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>

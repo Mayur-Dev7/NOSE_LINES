@@ -894,6 +894,20 @@ def aggregate_temporal_embeddings(
     })
 
 
+def calibrate_cosine_similarity(sim_pct: float, gamma: float = 0.737) -> float:
+    """
+    Calibrates raw high-dimensional cosine similarity percentage onto an intuitive
+    biometric percentage scale:
+      - 50.0% raw cosine -> 60.0% calibrated similarity
+      - 61.3% raw cosine -> ~70.0% calibrated similarity
+      - 80.0% raw cosine -> ~85.0% calibrated similarity
+      - 100.0% raw cosine -> 100.0% calibrated similarity
+    Preserves monotonicity and boundary conditions [0, 100].
+    """
+    norm = max(0.0, min(100.0, float(sim_pct))) / 100.0
+    return round(float(norm ** gamma) * 100.0, 2)
+
+
 def compute_dl_cosine_similarity(
     emb_a: Union[List[float], np.ndarray, Dict[str, Any]],
     emb_b: Union[List[float], np.ndarray, Dict[str, Any]],
@@ -903,6 +917,9 @@ def compute_dl_cosine_similarity(
     mean_emb_b: Optional[Union[List[float], np.ndarray]] = None,
     median_emb_a: Optional[Union[List[float], np.ndarray]] = None,
     median_emb_b: Optional[Union[List[float], np.ndarray]] = None,
+    match_threshold: float = 70.0,
+    likely_threshold: float = 58.0,
+    inconclusive_threshold: float = 48.0,
 ) -> Dict[str, Any]:
     """
     Computes Dual Similarity Scores between Video A and Video B:
@@ -940,29 +957,32 @@ def compute_dl_cosine_similarity(
     u_med_b = to_unit(med_b)
 
     # 1. Mean Pooling Cosine & L2
-    mean_dot = float(np.dot(u_mean_a, u_mean_b))
-    mean_sim_pct = round(max(0.0, min(1.0, mean_dot)) * 100.0, 2)
+    raw_mean_dot = float(np.dot(u_mean_a, u_mean_b))
+    raw_mean_sim_pct = round(max(0.0, min(1.0, raw_mean_dot)) * 100.0, 2)
+    mean_sim_pct = calibrate_cosine_similarity(raw_mean_sim_pct)
     mean_l2 = round(float(np.linalg.norm(u_mean_a - u_mean_b)), 4)
 
     # 2. Median Pooling Cosine & L2
-    med_dot = float(np.dot(u_med_a, u_med_b))
-    med_sim_pct = round(max(0.0, min(1.0, med_dot)) * 100.0, 2)
+    raw_med_dot = float(np.dot(u_med_a, u_med_b))
+    raw_med_sim_pct = round(max(0.0, min(1.0, raw_med_dot)) * 100.0, 2)
+    med_sim_pct = calibrate_cosine_similarity(raw_med_sim_pct)
     med_l2 = round(float(np.linalg.norm(u_med_a - u_med_b)), 4)
 
-    # Set default metrics to mean pooling
+    # Set default metrics to calibrated mean pooling
     dl_similarity_pct = mean_sim_pct
+    raw_dl_similarity_pct = raw_mean_sim_pct
     l2_dist = mean_l2
 
-    # Decision thresholds
-    if dl_similarity_pct >= 88.0:
+    # Decision thresholds (calibrated for zero-shot ConvNeXt-Tiny embeddings)
+    if dl_similarity_pct >= match_threshold:
         verdict = "MATCH (Confirmed Same Cattle)"
         badge_variant = "match"
         badge_color = "emerald"
-    elif dl_similarity_pct >= 78.0:
+    elif dl_similarity_pct >= likely_threshold:
         verdict = "LIKELY MATCH (High Biometric Similarity)"
         badge_variant = "likely"
         badge_color = "teal"
-    elif dl_similarity_pct >= 68.0:
+    elif dl_similarity_pct >= inconclusive_threshold:
         verdict = "INCONCLUSIVE (Partial Geometric Overlap)"
         badge_variant = "inconclusive"
         badge_color = "amber"
@@ -985,7 +1005,8 @@ def compute_dl_cosine_similarity(
             fa_u = to_unit(fa)
             for j, fb in enumerate(list_b):
                 fb_u = to_unit(fb)
-                s = round(max(0.0, float(np.dot(fa_u, fb_u))) * 100.0, 2)
+                s_raw = round(max(0.0, float(np.dot(fa_u, fb_u))) * 100.0, 2)
+                s = calibrate_cosine_similarity(s_raw)
                 row.append(s)
                 all_pair_sims.append(s)
             cross_matrix.append(row)
@@ -1005,15 +1026,21 @@ def compute_dl_cosine_similarity(
 
     return {
         "dl_similarity_pct": dl_similarity_pct,
+        "raw_dl_similarity_pct": raw_dl_similarity_pct,
         "l2_distance": l2_dist,
         "mean_pooling_similarity_pct": mean_sim_pct,
+        "raw_mean_pooling_similarity_pct": raw_mean_sim_pct,
         "mean_l2_distance": mean_l2,
         "median_pooling_similarity_pct": med_sim_pct,
+        "raw_median_pooling_similarity_pct": raw_med_sim_pct,
         "median_l2_distance": med_l2,
         "trimmed_cross_frame_similarity_pct": trimmed_cross_frame_sim_pct,
         "verdict": verdict,
         "badge_variant": badge_variant,
         "badge_color": badge_color,
+        "match_threshold": match_threshold,
+        "likely_threshold": likely_threshold,
+        "inconclusive_threshold": inconclusive_threshold,
         "cross_matrix": cross_matrix,
         "cross_matrix_stats": matrix_stats,
     }

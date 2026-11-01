@@ -1217,6 +1217,9 @@ class CosineSimilarityRequest(BaseModel):
     dl_median_b: Optional[List[float]] = None
     per_frames_a: Optional[List[List[float]]] = None
     per_frames_b: Optional[List[List[float]]] = None
+    dl_match_threshold: Optional[float] = None
+    dl_likely_threshold: Optional[float] = None
+    graph_match_threshold: Optional[float] = None
     device: Optional[str] = "cpu"
     cpu_cores: Optional[int] = 6
 
@@ -1232,6 +1235,14 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
     """
     t0 = time.perf_counter()
     try:
+        kwargs = {}
+        if req.dl_match_threshold is not None:
+            kwargs["dl_match_threshold"] = float(req.dl_match_threshold)
+        if req.dl_likely_threshold is not None:
+            kwargs["dl_likely_threshold"] = float(req.dl_likely_threshold)
+        if req.graph_match_threshold is not None:
+            kwargs["graph_match_threshold"] = float(req.graph_match_threshold)
+
         res = compute_cosine_similarity(
             vec_a=req.vector_a,
             vec_b=req.vector_b,
@@ -1243,6 +1254,7 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
             dl_mean_b=req.dl_mean_b,
             dl_median_a=req.dl_median_a,
             dl_median_b=req.dl_median_b,
+            **kwargs,
         )
         t_sim_ms = (time.perf_counter() - t0) * 1000
         if "step_timings" not in res or not isinstance(res["step_timings"], dict):

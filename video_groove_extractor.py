@@ -238,6 +238,11 @@ def compute_cosine_similarity(
     dl_mean_b: Optional[List[float]] = None,
     dl_median_a: Optional[List[float]] = None,
     dl_median_b: Optional[List[float]] = None,
+    dl_match_threshold: float = 70.0,
+    dl_likely_threshold: float = 58.0,
+    dl_inconclusive_threshold: float = 48.0,
+    graph_match_threshold: float = 80.0,
+    graph_likely_threshold: float = 70.0,
 ) -> Dict[str, Any]:
     """
     Computes Calibrated Cosine Similarity on 10-D graph minutiae parameters
@@ -274,14 +279,14 @@ def compute_cosine_similarity(
     calibrated_graph_sim = norm_sim * mag_penalty
 
     # Match classification based on calibrated graph similarity
-    is_match = calibrated_graph_sim >= 85.0
-    if calibrated_graph_sim >= 92.0:
+    is_match = calibrated_graph_sim >= graph_match_threshold
+    if calibrated_graph_sim >= 90.0:
         verdict = "MATCH (Confirmed Same Cattle)"
         verdict_color = "emerald"
-    elif calibrated_graph_sim >= 85.0:
+    elif calibrated_graph_sim >= graph_match_threshold:
         verdict = "LIKELY MATCH (High Similarity)"
         verdict_color = "teal"
-    elif calibrated_graph_sim >= 75.0:
+    elif calibrated_graph_sim >= graph_likely_threshold:
         verdict = "INCONCLUSIVE (Partial Overlap)"
         verdict_color = "amber"
     else:
@@ -297,6 +302,10 @@ def compute_cosine_similarity(
         "is_match": is_match,
         "verdict": verdict,
         "verdict_color": verdict_color,
+        "graph_match_threshold": graph_match_threshold,
+        "graph_likely_threshold": graph_likely_threshold,
+        "dl_match_threshold": dl_match_threshold,
+        "dl_likely_threshold": dl_likely_threshold,
         "vector_a": [round(float(x), 3) for x in vec_a],
         "vector_b": [round(float(x), 3) for x in vec_b],
     }
@@ -319,10 +328,16 @@ def compute_cosine_similarity(
                 mean_emb_b=dl_mean_b,
                 median_emb_a=dl_median_a,
                 median_emb_b=dl_median_b,
+                match_threshold=dl_match_threshold,
+                likely_threshold=dl_likely_threshold,
+                inconclusive_threshold=dl_inconclusive_threshold,
             )
             result["dl_similarity_pct"] = dl_res["dl_similarity_pct"]
+            result["raw_dl_similarity_pct"] = dl_res.get("raw_dl_similarity_pct", dl_res["dl_similarity_pct"])
             result["mean_pooling_similarity_pct"] = dl_res["mean_pooling_similarity_pct"]
+            result["raw_mean_pooling_similarity_pct"] = dl_res.get("raw_mean_pooling_similarity_pct", dl_res["mean_pooling_similarity_pct"])
             result["median_pooling_similarity_pct"] = dl_res["median_pooling_similarity_pct"]
+            result["raw_median_pooling_similarity_pct"] = dl_res.get("raw_median_pooling_similarity_pct", dl_res["median_pooling_similarity_pct"])
             result["trimmed_cross_frame_similarity_pct"] = dl_res["trimmed_cross_frame_similarity_pct"]
             result["l2_distance"] = dl_res["l2_distance"]
             result["mean_l2_distance"] = dl_res["mean_l2_distance"]
