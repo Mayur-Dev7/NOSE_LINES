@@ -157,14 +157,32 @@ All mathematical invariants and regression gates remain strictly enforced:
 
 ### Launching the System
 
-```bash
-# 1. Activate Python 3.8 virtual environment
-source .venv/bin/activate
+### One-Click Launch (Recommended)
 
-# 2. Launch FastAPI backend server (Port 8000)
+Run the unified startup script from the repository root to launch both the FastAPI backend and Vite frontend with automatic port cleanup and health monitoring:
+
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+This script:
+1. Cleans up existing processes on ports 8000 and 5173.
+2. Starts the FastAPI backend (`server.py`) and polls until healthy (`http://127.0.0.1:8000/api/status`).
+3. Starts the Vite dev server (`npm run dev`) and polls until ready (`http://127.0.0.1:5173/`).
+4. Automatically detects your LAN IP and displays both local and network URLs.
+5. Gracefully handles `Ctrl + C` by cleanly terminating both background processes.
+
+### Manual Launch (Separate Terminals)
+
+Alternatively, launch the servers manually in separate terminals:
+
+```bash
+# Terminal 1: Backend Server (Port 8000)
+source .venv/bin/activate
 python server.py
 
-# 3. In another terminal, launch Vite frontend development server (Port 5173)
+# Terminal 2: Frontend Server (Port 5173)
 cd frontend
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
@@ -214,6 +232,7 @@ python benchmark_pipeline.py
 ├── muzzle_matcher.py                                   # All-pairs verification orchestration
 ├── video_groove_extractor.py                           # 7-stage video extraction & GPU pipelining
 ├── server.py                                           # FastAPI backend server
+├── start.sh                                            # Unified one-click server & UI startup script
 ├── benchmark_pipeline.py                               # Hardware benchmarking suite
 ├── regression_checker.py                               # Golden baseline regression gate checker
 ├── golden_artifacts/                                   # Saved baseline tensors & embeddings
