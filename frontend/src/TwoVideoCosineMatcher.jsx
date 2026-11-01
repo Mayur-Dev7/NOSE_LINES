@@ -86,8 +86,11 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   // Primary metric driver: 'mean' (Outlier-Pruned Mean) or 'median' (5-Frame Median)
   const [primaryMetric, setPrimaryMetric] = useState('mean');
 
-  // Match confidence decision threshold (Default: 70.0% for balanced bovine verification)
-  const [matchThreshold, setMatchThreshold] = useState(70.0);
+  // Match confidence decision threshold (Default: 80.0%, full range 0-100)
+  const [matchThreshold, setMatchThreshold] = useState(80.0);
+
+  // Score display mode: Calibrated boosted score vs Raw cosine similarity
+  const [useCalibrated, setUseCalibrated] = useState(true);
 
   // Execution & Progress state
   const [processing, setProcessing] = useState(false);
@@ -428,21 +431,24 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
     }
   }
 
-  // Active Metric Driver based on user toggle
-  const activeSim = primaryMetric === 'mean' ? (meanSim ?? 0) : medianSim;
+  // Active Metric Driver based on user toggle (Outlier-Pruned Mean vs 5-Frame Median)
+  const baseSim = primaryMetric === 'mean' ? (meanSim ?? 0) : medianSim;
   const activeL2 = primaryMetric === 'mean' ? (meanL2 ?? 0) : medianL2;
   const rawSim = primaryMetric === 'mean'
-    ? (matchResult?.raw_mean_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct)
-    : (matchResult?.raw_median_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct);
+    ? (matchResult?.raw_mean_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct ?? baseSim)
+    : (matchResult?.raw_median_pooling_similarity_pct ?? matchResult?.raw_dl_similarity_pct ?? baseSim);
 
-  // 4-Tier Biometric Status Badges (Apple Design System) with dynamic thresholding
-  const likelyThreshold = Number((matchThreshold - 12.0).toFixed(1)); // e.g. 58% when match is 70%
-  const inconclusiveThreshold = Number((matchThreshold - 22.0).toFixed(1)); // e.g. 48% when match is 70%
+  // Active Sim respects the Calibrated vs Raw toggle
+  const activeSim = useCalibrated ? Number(baseSim) : Number(rawSim);
 
+  // 3-Tier Dynamic Threshold Decision Logic (Full 0 to 100 Range):
+  // - activeSim >= matchThreshold: CONFIRMED MATCH (Green)
+  // - activeSim >= matchThreshold - 10: INCONCLUSIVE / NOT CONFIRMED (Yellow)
+  // - activeSim < matchThreshold - 10: DISTINCT ANIMALS / NON-MATCH (Red)
   const isMatch = activeSim >= matchThreshold;
-  const isLikely = activeSim >= likelyThreshold && activeSim < matchThreshold;
-  const isInconclusive = activeSim >= inconclusiveThreshold && activeSim < likelyThreshold;
-  const isDistinct = activeSim < inconclusiveThreshold;
+  const isInconclusive = !isMatch && (activeSim >= Math.max(0, matchThreshold - 10.0));
+  const isDistinct = !isMatch && !isInconclusive;
+  const isLikely = false;
 
   return (
     <div className="flex flex-col gap-6 text-slate-100 max-w-5xl mx-auto w-full pb-20">
@@ -767,12 +773,10 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       {matchResult && (
         <div id="biometric-results-view" className="flex flex-col gap-6 pt-2 animate-in fade-in duration-300">
           
-          {/* THE HERO VERDICT BANNER (4-Tier Apple Status System) */}
+          {/* THE HERO VERDICT BANNER (3-Tier Status System: Green Match, Yellow Inconclusive, Red Distinct) */}
           <div className={`p-6 rounded-3xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl relative overflow-hidden backdrop-blur-2xl transition-all ${
             isMatch
               ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900/60 to-slate-950/80 border-emerald-500/40 shadow-[0_0_30px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/20'
-              : isLikely
-              ? 'bg-gradient-to-br from-teal-950/40 via-slate-900/60 to-slate-950/80 border-teal-500/40 shadow-[0_0_30px_rgba(20,184,166,0.15)] ring-1 ring-teal-500/20'
               : isInconclusive
               ? 'bg-gradient-to-br from-amber-950/40 via-slate-900/60 to-slate-950/80 border-amber-500/40 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20'
               : 'bg-gradient-to-br from-rose-950/40 via-slate-900/60 to-slate-950/80 border-rose-500/40 shadow-[0_0_30px_rgba(244,63,94,0.15)] ring-1 ring-rose-500/20'
@@ -783,16 +787,12 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all ${
                 isMatch
                   ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
-                  : isLikely
-                  ? 'bg-teal-500/20 text-teal-400 border-teal-500/40 shadow-[0_0_20px_rgba(20,184,166,0.25)]'
                   : isInconclusive
                   ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.25)]'
                   : 'bg-rose-500/20 text-rose-400 border-rose-500/40 shadow-[0_0_20px_rgba(244,63,94,0.25)]'
               }`}>
                 {isMatch ? (
                   <CheckCircle2 className="w-8 h-8" />
-                ) : isLikely ? (
-                  <Sparkles className="w-8 h-8" />
                 ) : isInconclusive ? (
                   <AlertCircle className="w-8 h-8" />
                 ) : (
@@ -805,37 +805,31 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold font-mono tracking-wide uppercase border ${
                     isMatch
                       ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs'
-                      : isLikely
-                      ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 shadow-xs'
                       : isInconclusive
                       ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs'
                       : 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-xs'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
-                      isMatch ? 'bg-emerald-400' : isLikely ? 'bg-teal-400' : isInconclusive ? 'bg-amber-400' : 'bg-rose-400'
+                      isMatch ? 'bg-emerald-400' : isInconclusive ? 'bg-amber-400' : 'bg-rose-400'
                     }`} />
-                    {isMatch ? 'BIOMETRIC MATCH' : isLikely ? 'LIKELY MATCH' : isInconclusive ? 'INCONCLUSIVE' : 'DISTINCT ANIMALS'}
+                    {isMatch ? 'BIOMETRIC MATCH' : isInconclusive ? 'INCONCLUSIVE (NOT CONFIRMED)' : 'DISTINCT ANIMALS'}
                   </span>
                 </div>
                 
                 <h2 className="text-xl font-bold tracking-tight text-white">
                   {isMatch
                     ? 'Confirmed Same Cattle (Profile Match)'
-                    : isLikely
-                    ? 'Likely Same Cattle (High Biometric Overlap)'
                     : isInconclusive
-                    ? 'Partial Overlap (Inconclusive Similarity)'
+                    ? 'Inconclusive / Not Confirmed (Partial Overlap)'
                     : 'Different Cattle (Identity Rejected)'}
                 </h2>
 
                 <p className="text-xs text-slate-300/80 mt-1 max-w-xl font-normal leading-relaxed">
                   {isMatch
-                    ? `Video A (${matchResult.videoAName}) and Video B (${matchResult.videoBName}) share identical epidermal muzzle groove dermatoglyphics and ArcFace feature vectors.`
-                    : isLikely
-                    ? `Video A and Video B exhibit high ridge alignment and consistent latent features. Recommended as same animal identity.`
+                    ? `Video A (${matchResult.videoAName}) and Video B (${matchResult.videoBName}) share identical epidermal muzzle groove dermatoglyphics and feature vectors (Score: ${activeSim.toFixed(1)}% ≥ ${matchThreshold}%).`
                     : isInconclusive
-                    ? `Video A and Video B exhibit partial ridge alignment. Acquiring an additional high-sharpness reference frame is recommended.`
-                    : `Video A and Video B exhibit distinct ridge loop topologies and non-matching dermatoglyphic patterns.`}
+                    ? `Video A and Video B exhibit partial alignment (${activeSim.toFixed(1)}%). Below threshold (${matchThreshold}%). Inconclusive / Not confirmed as same animal.`
+                    : `Video A and Video B exhibit distinct ridge loop topologies (${activeSim.toFixed(1)}% < ${Math.max(0, matchThreshold - 10)}%). Confirmed different cattle.`}
                 </p>
               </div>
             </div>
@@ -900,57 +894,98 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             </div>
           </div>
 
-          {/* DYNAMIC CONFIDENCE THRESHOLD CONTROLLER */}
+          {/* DYNAMIC CONFIDENCE THRESHOLD CONTROLLER (0 TO 100) */}
           <div className="backdrop-blur-xl bg-slate-900/60 border border-white/[0.08] px-5 py-3.5 rounded-3xl flex items-center justify-between gap-4 flex-wrap shadow-lg">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shrink-0">
+              <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
+                isMatch
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  : isInconclusive
+                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+              }`}>
                 <SlidersHorizontal className="w-4 h-4" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-semibold text-white tracking-wide">Confidence Decision Threshold:</span>
-                  <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  <span className="text-xs font-semibold text-white tracking-wide">Match Decision Threshold:</span>
+                  <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md border ${
+                    isMatch
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : isInconclusive
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                  }`}>
                     &ge; {matchThreshold}% Match
                   </span>
                   <span className="text-[11px] text-slate-400 font-mono">
-                    (Likely: &ge; {likelyThreshold}%, Inconclusive: &ge; {inconclusiveThreshold}%)
+                    (Yellow: {Math.max(0, matchThreshold - 10)}%–{matchThreshold}%, Red: &lt; {Math.max(0, matchThreshold - 10)}%)
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Dynamically adjust matching sensitivity across varied pasture lighting, camera angles, and distance.
+                  Full 0%–100% threshold range. Score is <strong className="text-white font-mono">{activeSim.toFixed(1)}%</strong> &rarr; Status is {isMatch ? <span className="text-emerald-400 font-semibold">MATCH (Green)</span> : isInconclusive ? <span className="text-amber-400 font-semibold">NOT CONFIRMED (Yellow)</span> : <span className="text-rose-400 font-semibold">DISTINCT (Red)</span>}.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3 ml-auto flex-wrap">
-              {/* Slider */}
+              {/* Score Mode Switch: Calibrated vs Raw */}
+              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-xl border border-white/[0.08] text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => setUseCalibrated(true)}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                    useCalibrated
+                      ? 'bg-white/10 text-white border border-white/10 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Calibrated boosted biometric score (50% -> 60%)"
+                >
+                  Calibrated ({Number(baseSim).toFixed(1)}%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUseCalibrated(false)}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                    !useCalibrated
+                      ? 'bg-white/10 text-white border border-white/10 shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Raw uncalibrated cosine dot product"
+                >
+                  Raw Cosine ({Number(rawSim).toFixed(1)}%)
+                </button>
+              </div>
+
+              {/* Slider (Full 0% to 100% Range) */}
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono text-slate-500">50%</span>
+                <span className="text-[10px] font-mono text-slate-500">0%</span>
                 <input
                   type="range"
-                  min="50"
-                  max="85"
+                  min="0"
+                  max="100"
                   step="1"
                   value={matchThreshold}
                   onChange={(e) => setMatchThreshold(Number(e.target.value))}
-                  className="w-28 sm:w-36 accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
+                  className="w-32 sm:w-48 accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
                   title={`Adjust match threshold (currently ${matchThreshold}%)`}
                 />
-                <span className="text-[10px] font-mono text-slate-500">85%</span>
+                <span className="text-[10px] font-mono text-slate-500">100%</span>
               </div>
 
               {/* Quick Presets */}
               <div className="flex items-center bg-slate-950/80 p-0.5 rounded-xl border border-white/[0.08]">
                 {[
-                  { label: 'Relaxed (60%)', val: 60 },
-                  { label: 'Balanced (70%)', val: 70 },
-                  { label: 'Strict (80%)', val: 80 },
+                  { label: '65%', val: 65 },
+                  { label: '75%', val: 75 },
+                  { label: '80%', val: 80 },
+                  { label: '85%', val: 85 },
                 ].map((p) => (
                   <button
                     key={p.val}
                     type="button"
                     onClick={() => setMatchThreshold(p.val)}
-                    className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
+                    className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
                       matchThreshold === p.val
                         ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 shadow-xs'
                         : 'text-slate-400 hover:text-slate-200 border border-transparent'
