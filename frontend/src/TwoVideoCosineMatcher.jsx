@@ -118,13 +118,17 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const handleFileUploadA = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size === 0) {
+      alert(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please check your file.`);
+      return;
+    }
     setUploadingA(true);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setVideoA(data.path);
         setUploadedNameA(data.filename);
       } else {
@@ -141,13 +145,17 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const handleFileUploadB = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size === 0) {
+      alert(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please check your file.`);
+      return;
+    }
     setUploadingB(true);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setVideoB(data.path);
         setUploadedNameB(data.filename);
       } else {

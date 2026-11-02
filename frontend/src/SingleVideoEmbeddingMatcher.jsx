@@ -178,6 +178,10 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
   const handleVideoUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size === 0) {
+      setExtractError(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please select a valid video file.`);
+      return;
+    }
     setIsUploading(true);
     setExtractError(null);
     const formData = new FormData();
@@ -185,7 +189,7 @@ export default function SingleVideoEmbeddingMatcher({ sampleVideos = [] }) {
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success && data.path) {
+      if (res.ok && data.success && data.path) {
         setUploadedVideoPath(data.path);
         setUploadedVideoName(data.filename || file.name);
         setVideoMode('upload');

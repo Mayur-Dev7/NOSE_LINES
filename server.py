@@ -208,13 +208,14 @@ async def get_system_status():
             "path": str(vid),
             "size_mb": round(vid.stat().st_size / (1024 * 1024), 2)
         })
-    # Also check uploads
+    # Also check uploads (only valid non-empty videos)
     for vid in sorted(UPLOADS_DIR.glob("*.mp4")):
-        sample_videos.append({
-            "name": f"Uploaded: {vid.name.split('_', 1)[-1]}",
-            "path": str(vid),
-            "size_mb": round(vid.stat().st_size / (1024 * 1024), 2)
-        })
+        if vid.stat().st_size > 0:
+            sample_videos.append({
+                "name": f"Uploaded: {vid.name.split('_', 1)[-1]}",
+                "path": str(vid),
+                "size_mb": round(vid.stat().st_size / (1024 * 1024), 2)
+            })
 
     return {
         "status": "ready",
@@ -246,13 +247,22 @@ async def upload_file(file: UploadFile = File(...)):
     with open(save_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
+    file_size = save_path.stat().st_size
+    if file_size == 0:
+        if save_path.exists():
+            save_path.unlink()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Uploaded file '{filename}' is empty (0 bytes). Please ensure the file has completed downloading and is not corrupted."
+        )
+
     is_video = save_path.suffix.lower() in [".mp4", ".avi", ".mov", ".mkv"]
     return {
         "success": True,
         "filename": filename,
         "path": str(save_path),
         "is_video": is_video,
-        "size_mb": round(save_path.stat().st_size / (1024 * 1024), 2),
+        "size_mb": round(file_size / (1024 * 1024), 2),
     }
 
 
@@ -378,6 +388,8 @@ async def stream_video(
     """Processes a video file and streams frame crops and logs over SSE."""
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video file not found")
+    if os.path.getsize(video_path) == 0:
+        raise HTTPException(status_code=400, detail="Video file is empty (0 bytes). Please select a valid video file.")
 
     job_output_dir = OUTPUT_DIR / f"run_video_{int(time.time())}"
     job_output_dir.mkdir(parents=True, exist_ok=True)
@@ -527,6 +539,10 @@ async def stream_compare_videos(
         raise HTTPException(status_code=404, detail=f"Video A file not found: {video_a}")
     if not resolved_b.exists():
         raise HTTPException(status_code=404, detail=f"Video B file not found: {video_b}")
+    if resolved_a.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video A file is empty (0 bytes): {resolved_a.name}")
+    if resolved_b.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video B file is empty (0 bytes): {resolved_b.name}")
 
     job_output_dir = OUTPUT_DIR / f"run_compare_{int(time.time()*1000)}"
     job_output_dir.mkdir(parents=True, exist_ok=True)
@@ -823,6 +839,8 @@ async def process_video_grooves_endpoint(req: ProcessVideoGroovesRequest):
     resolved_v = resolve_video_path(req.video_path)
     if not resolved_v or not resolved_v.exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
+    if resolved_v.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video file is empty (0 bytes): {resolved_v.name}")
 
     import asyncio
     from functools import partial
@@ -1161,6 +1179,8 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
     resolved_v = resolve_video_path(req.video_path)
     if not resolved_v or not resolved_v.exists():
         raise HTTPException(status_code=404, detail=f"Video not found: {req.video_path}")
+    if resolved_v.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video file is empty (0 bytes): {resolved_v.name}")
 
     from functools import partial
     fn = partial(
@@ -1202,6 +1222,8 @@ async def extract_video_five_frames_endpoint(req: ExtractVideoFiveFramesRequest)
         return _sanitize_floats(safe)
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"5-Frame extraction failed: {exc}")
 
@@ -1847,6 +1869,10 @@ async def match_video_endpoint(req: VideoMatchRequest):
         raise HTTPException(status_code=404, detail=f"Video A not found: {req.video_a_path}")
     if not vb or not vb.exists():
         raise HTTPException(status_code=404, detail=f"Video B not found: {req.video_b_path}")
+    if va.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video A is empty (0 bytes): {va.name}")
+    if vb.stat().st_size == 0:
+        raise HTTPException(status_code=400, detail=f"Video B is empty (0 bytes): {vb.name}")
 
     options = (
         req.filter_method or "frangi",

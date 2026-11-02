@@ -591,6 +591,8 @@ def _extract_stages_1_and_2(
     v_path = Path(video_path).resolve()
     if not v_path.is_file():
         raise FileNotFoundError(f"Video file not found at: {v_path}")
+    if v_path.stat().st_size == 0:
+        raise ValueError(f"Video file is empty (0 bytes): {v_path.name}")
 
     matcher_params_path = PROJECT_ROOT / "config" / "matching_params.json"
     try:

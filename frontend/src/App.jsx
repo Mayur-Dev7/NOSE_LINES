@@ -187,16 +187,22 @@ export default function App() {
   const handleUploadVideoA = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size === 0) {
+      alert(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please check your file.`);
+      return;
+    }
     setUploadingA(true);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setCompareVideoA(data.path);
         setUploadedNameA(data.filename);
         setVideoAMode('upload');
+      } else {
+        alert('Upload failed: ' + (data.detail || 'Unknown error'));
       }
     } catch (err) {
       alert('Upload failed: ' + err.message);
@@ -209,16 +215,22 @@ export default function App() {
   const handleUploadVideoB = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size === 0) {
+      alert(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please check your file.`);
+      return;
+    }
     setUploadingB(true);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setCompareVideoB(data.path);
         setUploadedNameB(data.filename);
         setVideoBMode('upload');
+      } else {
+        alert('Upload failed: ' + (data.detail || 'Unknown error'));
       }
     } catch (err) {
       alert('Upload failed: ' + err.message);
@@ -231,19 +243,25 @@ export default function App() {
   const handleFileUploadSingle = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if (file.size === 0) {
+      alert(`The selected file "${file.name}" is 0 bytes (empty or incomplete download). Please check your file.`);
+      return;
+    }
     setUploadedFile(file);
     const formData = new FormData();
     formData.append('file', file);
     try {
       const res = await fetch('/api/upload', { method: 'POST', body: formData });
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         setUploadedFilePath(data.path);
         if (data.is_video) {
           setInputMode('upload_video');
         } else {
           setInputMode('upload_image');
         }
+      } else {
+        alert('Upload failed: ' + (data.detail || 'Unknown error'));
       }
     } catch (err) {
       alert('Upload failed: ' + err.message);
