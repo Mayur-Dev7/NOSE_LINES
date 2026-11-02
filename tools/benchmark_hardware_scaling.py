@@ -24,7 +24,7 @@ import json
 import subprocess
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parent.parent
 WEIGHTS_PATH = "/home/adis_mayur/F_CODES/crop11dec.h5"
 PYTHON_EXEC = str(BASE_DIR / ".venv" / "bin" / "python")
 CROPPER_SCRIPT = str(BASE_DIR / "muzzle_cropper.py")

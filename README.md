@@ -9,8 +9,8 @@ Much like human fingerprints, bovine muzzle dermatoglyphic ridge-valley patterns
 ## Technical Documentation & Architecture Guides
 
 Detailed architectural blueprints and mathematical derivations are available in the repository:
-- 📘 [**`BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md`**](file:///home/adis_mayur/F_CODES/nose_lines/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md): Full technical specification covering deep learning models, hardware environments (RTX 3050 Laptop GPU vs. Ryzen 5 5600H CPU), 7-stage pipeline workflows, and optimization logs.
-- 🔬 [**`ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md`**](file:///home/adis_mayur/F_CODES/nose_lines/ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md): Backend machine learning and computer vision blueprint detailing the discrete Laplacian convolutions, Mask R-CNN FPN architecture, Frangi differential geometry, SpatialPyramidGeM, ArcFace formulations, and performance engineering benchmarks.
+- 📘 [**`BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md`**](file:///home/adis_mayur/F_CODES/nose_lines/docs/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md): Full technical specification covering deep learning models, hardware environments (RTX 3050 Laptop GPU vs. Ryzen 5 5600H CPU), 7-stage pipeline workflows, and optimization logs.
+- 🔬 [**`ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md`**](file:///home/adis_mayur/F_CODES/nose_lines/docs/ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md): Backend machine learning and computer vision blueprint detailing the discrete Laplacian convolutions, Mask R-CNN FPN architecture, Frangi differential geometry, SpatialPyramidGeM, ArcFace formulations, and performance engineering benchmarks.
 
 ---
 
@@ -196,10 +196,10 @@ Open your browser at **`http://localhost:5173`**.
 pytest tests/
 
 # Run the strict regression gate against golden baseline artifacts
-python regression_checker.py --profiles GPU CPU-6 CPU-2
+python tools/regression_checker.py --profiles GPU CPU-6 CPU-2
 
 # Run subprocess-isolated hardware benchmarks
-python benchmark_pipeline.py
+python tools/benchmark_pipeline.py
 ```
 
 ---
@@ -220,8 +220,12 @@ python benchmark_pipeline.py
 
 ```text
 /home/adis_mayur/F_CODES/nose_lines/
-├── BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md # Full architecture & hardware report
-├── ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md         # Pure ML/CV & performance engineering guide
+├── docs/                                               # Architectural specs & optimization guides
+│   ├── BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md
+│   ├── ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md
+│   ├── BIOMETRIC_VERIFICATION_ARCHITECTURE.md
+│   ├── OPTIMIZATION_NOTES.md
+│   └── PHASE0_REPORT.md
 ├── README.md                                           # This document
 ├── config.py                                           # Centralized pipeline configurations
 ├── cv_workers.py                                       # Multiprocessing worker pool (Steps 3-5)
@@ -233,8 +237,15 @@ python benchmark_pipeline.py
 ├── video_groove_extractor.py                           # 7-stage video extraction & GPU pipelining
 ├── server.py                                           # FastAPI backend server
 ├── start.sh                                            # Unified one-click server & UI startup script
-├── benchmark_pipeline.py                               # Hardware benchmarking suite
-├── regression_checker.py                               # Golden baseline regression gate checker
+├── tools/                                              # Benchmark, calibration, and training utilities
+│   ├── benchmark_pipeline.py                           # Hardware benchmarking suite
+│   ├── regression_checker.py                           # Golden baseline regression gate checker
+│   ├── benchmark_cpu2_speedup.py                       # CPU 2-core acceleration benchmark
+│   ├── benchmark_dl_matcher.py                         # Deep learning matcher verification harness
+│   ├── benchmark_hardware_scaling.py                   # Multi-core scaling latency profiler
+│   ├── process_video_grooves.py                        # Standalone video groove processor
+│   ├── eval_matching.py                                # Biometric ROC/EER calibration harness
+│   └── train_arcface_muzzle.py                         # ArcFace fine-tuning utility
 ├── golden_artifacts/                                   # Saved baseline tensors & embeddings
 ├── weights/
 │   └── crop11dec.h5                                    # Mask R-CNN ResNet-50-FPN weights (244 MB)
@@ -243,7 +254,7 @@ python benchmark_pipeline.py
 │   ├── src/AppleHardwareSelector.jsx                   # Hardware profile selection pill
 │   ├── src/LiveTelemetryLogs.jsx                       # Real-time streaming log terminal
 │   └── vite.config.js                                  # Vite proxy config with 10-min timeout
-└── tests/                                              # 142 automated unit and integration tests
+└── tests/                                              # Automated unit and integration tests
 ```
 
 ---

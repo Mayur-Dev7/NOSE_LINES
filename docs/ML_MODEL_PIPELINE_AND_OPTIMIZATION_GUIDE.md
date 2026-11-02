@@ -199,7 +199,7 @@ The latency optimization goal was to cut two-video comparison time from **1 minu
 ### Guarantee of Unaltered Model Weights
 - **Mask R-CNN Weights (`crop11dec.h5`)**: Exactly 255,874,680 bytes (244.0 MB), SHA256 / MD5 verified bit-identical.
 - **ConvNeXt-Tiny Embedder**: Full `torch.float32` weights and activations (no INT8 quantization, no pruning).
-- **Direct Regression Metric**: Evaluated via [`regression_checker.py`](file:///home/adis_mayur/F_CODES/nose_lines/regression_checker.py), the 512-D embeddings produced before and after optimization maintain a bit-exact **1.000000 cosine similarity**.
+- **Direct Regression Metric**: Evaluated via [`tools/regression_checker.py`](file:///home/adis_mayur/F_CODES/nose_lines/tools/regression_checker.py), the 512-D embeddings produced before and after optimization maintain a bit-exact **1.000000 cosine similarity**.
 
 ---
 
@@ -367,5 +367,5 @@ Evaluated on `muzzleVideo.mp4` vs. `muzzleVideo2.mp4` on the target AMD Ryzen 5 
 
 ---
 
-*File location:* `/home/adis_mayur/F_CODES/nose_lines/ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md`  
-*Related architecture document:* [`/home/adis_mayur/F_CODES/nose_lines/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md`](file:///home/adis_mayur/F_CODES/nose_lines/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md)
+*File location:* `/home/adis_mayur/F_CODES/nose_lines/docs/ML_MODEL_PIPELINE_AND_OPTIMIZATION_GUIDE.md`  
+*Related architecture document:* [`/home/adis_mayur/F_CODES/nose_lines/docs/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md`](file:///home/adis_mayur/F_CODES/nose_lines/docs/BOVINE_BIOMETRIC_MODEL_AND_HARDWARE_ARCHITECTURE.md)
