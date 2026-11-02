@@ -45,24 +45,41 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Ensure project root is in sys.path
+# Ensure project root and ml/ package are in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+ML_DIR = PROJECT_ROOT / "ml"
+for _p in [str(PROJECT_ROOT), str(ML_DIR)]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
-from muzzle_matcher import (
-    match_sift_ransac,
-    match_minutiae,
-    extract_minutiae_points,
-    match_muzzle_frame_sets,
-    compare_two_frames_biometric,
-    enhance_muzzle_image,
-    _resolve_frame_data,
-    CANONICAL_SIZE,
-    DEFAULT_MATCH_THRESHOLD,
-)
-from video_groove_extractor import extract_five_muzzle_stages
-from groove_extractor import extract_muzzle_grooves_pipeline
+try:
+    from ml.muzzle_matcher import (
+        match_sift_ransac,
+        match_minutiae,
+        extract_minutiae_points,
+        match_muzzle_frame_sets,
+        compare_two_frames_biometric,
+        enhance_muzzle_image,
+        _resolve_frame_data,
+        CANONICAL_SIZE,
+        DEFAULT_MATCH_THRESHOLD,
+    )
+    from ml.video_groove_extractor import extract_five_muzzle_stages
+    from ml.groove_extractor import extract_muzzle_grooves_pipeline
+except ImportError:
+    from muzzle_matcher import (
+        match_sift_ransac,
+        match_minutiae,
+        extract_minutiae_points,
+        match_muzzle_frame_sets,
+        compare_two_frames_biometric,
+        enhance_muzzle_image,
+        _resolve_frame_data,
+        CANONICAL_SIZE,
+        DEFAULT_MATCH_THRESHOLD,
+    )
+    from video_groove_extractor import extract_five_muzzle_stages
+    from groove_extractor import extract_muzzle_grooves_pipeline
 
 logger = logging.getLogger("eval_matching")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
