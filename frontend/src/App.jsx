@@ -4,6 +4,7 @@ import GrooveTuningSection from './GrooveTuningSection';
 import MultiImageTemplateBuilder from './MultiImageTemplateBuilder';
 import TwoVideoCosineMatcher from './TwoVideoCosineMatcher';
 import SingleVideoEmbeddingMatcher from './SingleVideoEmbeddingMatcher';
+import { ThemeToggle } from './components/ui/theme-toggle';
 import {
   Search,
   Cpu,
@@ -536,46 +537,47 @@ export default function App() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
+    <div className="min-h-screen bg-[#f5f5f7] dark:bg-[#0b0f19] text-slate-800 dark:text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white transition-colors duration-250">
       {/* Top Header */}
-      <header className="border-b border-white/[0.08] bg-slate-950/80 backdrop-blur-2xl sticky top-0 z-50 px-6 py-3.5 transition-all">
+      <header className="border-b border-black/[0.06] dark:border-white/[0.08] bg-white/75 dark:bg-slate-950/80 backdrop-blur-2xl sticky top-0 z-50 px-6 py-3.5 transition-all shadow-xs">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center space-x-3.5">
-            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-black/5 dark:ring-white/20">
               <ScanLine className="w-5 h-5 text-slate-950" />
             </div>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-base font-semibold tracking-tight text-white flex items-center gap-2">
+                <h1 className="text-base font-semibold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
                   Bovine Biometric Studio
                 </h1>
-                <span className="text-[10px] font-semibold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 font-mono shadow-xs">
+                <span className="text-[10px] font-semibold tracking-wider uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 dark:border-emerald-500/25 font-mono shadow-xs">
                   ConvNeXt ArcFace &bull; GeM 512-D
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-normal mt-0.5">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 font-normal mt-0.5">
                 5-Frame Temporal Muzzle Pooling &bull; Epidermal Dermatoglyphic Ridge Skeletonization &bull; 10-D Minutiae Topology
               </p>
             </div>
           </div>
 
-          {/* System Hardware Status Badges */}
+          {/* System Hardware Status Badges & Theme Toggle */}
           <div className="flex items-center gap-2.5">
+            <ThemeToggle />
             {status?.hardware?.gpu_available ? (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs font-medium backdrop-blur-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <Zap className="w-3.5 h-3.5 text-emerald-400" />
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-300 text-xs font-medium backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse"></span>
+                <Zap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                 <span>GPU: {status.hardware.gpu_name}</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs font-medium backdrop-blur-md">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs font-medium backdrop-blur-md">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 dark:bg-amber-400"></span>
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                 <span>GPU Standby</span>
               </div>
             )}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/[0.08] text-slate-300 text-xs font-medium backdrop-blur-md">
-              <Cpu className="w-3.5 h-3.5 text-sky-400" />
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] border border-black/[0.06] dark:border-white/[0.08] text-slate-700 dark:text-slate-300 text-xs font-medium backdrop-blur-md">
+              <Cpu className="w-3.5 h-3.5 text-sky-500 dark:text-sky-400" />
               <span>{status?.hardware?.cpu_threads || 12} Threads</span>
             </div>
           </div>
@@ -585,21 +587,21 @@ export default function App() {
       {/* Main Container */}
       <main className="max-w-7xl mx-auto w-full p-6 flex-1 flex flex-col gap-6">
         {/* Navigation Tabs - macOS style segmented dock */}
-        <div className="flex flex-wrap items-center justify-between border-b border-white/[0.08] pb-3 gap-3">
-          <div className="flex flex-wrap items-center p-1 bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/[0.06] gap-1 shadow-inner">
+        <div className="flex flex-wrap items-center justify-between border-b border-black/[0.06] dark:border-white/[0.08] pb-3 gap-3">
+          <div className="flex flex-wrap items-center p-1 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-black/[0.06] dark:border-white/[0.06] gap-1 shadow-sm">
             {/* Primary Default Tab: 2-Video Cosine Matcher (Flagship) */}
             <button
               onClick={() => setActiveTab('two_video_cosine')}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
                 activeTab === 'two_video_cosine'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-sm border border-black/[0.06] dark:border-white/15 backdrop-blur-md'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-black/[0.02] dark:hover:bg-white/[0.04]'
               }`}
             >
-              <GitCompare className="w-3.5 h-3.5 text-emerald-400" />
+              <GitCompare className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
               <span>2-Video Biometric Matcher</span>
               <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
-                activeTab === 'two_video_cosine' ? 'bg-emerald-500/25 text-emerald-300' : 'bg-white/[0.05] text-slate-400'
+                activeTab === 'two_video_cosine' ? 'bg-emerald-500/15 dark:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300' : 'bg-black/[0.05] dark:bg-white/[0.05] text-slate-500 dark:text-slate-400'
               }`}>
                 Flagship
               </span>

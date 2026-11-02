@@ -1,46 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  color-scheme: dark;
+@layer base {
+  :root {
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+    --background: 245 245 247; /* #f5f5f7 Apple light */
+    --foreground: 29 29 31;    /* #1d1d1f Apple dark text */
+    --card: 255 255 255;
+    --card-foreground: 29 29 31;
+    --border: 229 231 235;
+    color-scheme: light;
+  }
+
+  .dark {
+    --background: 11 15 25;    /* #0b0f19 Apple dark */
+    --foreground: 241 245 249; /* #f1f5f9 */
+    --card: 17 24 39;
+    --card-foreground: 241 245 249;
+    --border: 30 41 59;
+    color-scheme: dark;
+  }
 }
 
 body {
   margin: 0;
   padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f5f5f7;
+  color: #1d1d1f;
+  min-height: 100vh;
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+.dark body, body:where(.dark, .dark *) {
   background-color: #0b0f19;
   color: #e2e8f0;
-  min-height: 100vh;
 }
 
 code, pre, .font-mono {
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, "JetBrains Mono", monospace;
 }
 
-/* Custom Scrollbar */
+/* Apple Smooth Scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #111827;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #374151;
-  border-radius: 4px;
+  background: rgba(140, 140, 145, 0.35);
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: rgba(140, 140, 145, 0.55);
 }
 
-/* Glass Card */
+/* Apple Frosted Glass Surface */
 .glass-panel {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.04), 0 2px 6px -1px rgba(0, 0, 0, 0.02);
+}
+
+.dark .glass-panel {
   background: rgba(17, 24, 39, 0.75);
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
 }
 
 .terminal-panel {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+
+.dark .terminal-panel {
   background: #050811;
   border: 1px solid #1e293b;
+  color: #e2e8f0;
 }

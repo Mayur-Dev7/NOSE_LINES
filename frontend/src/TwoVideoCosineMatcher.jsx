@@ -465,24 +465,24 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
   const isLikely = false;
 
   return (
-    <div className="flex flex-col gap-6 text-slate-100 max-w-5xl mx-auto w-full pb-20">
+    <div className="flex flex-col gap-6 text-slate-900 dark:text-slate-100 max-w-5xl mx-auto w-full pb-20 transition-colors duration-250">
       
       {/* ========================================================= */}
       {/* 1. APPLE-STYLE HERO HEADER                                */}
       {/* ========================================================= */}
-      <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-6 rounded-3xl flex items-center justify-between gap-4 flex-wrap transition-all">
+      <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-6 rounded-3xl flex items-center justify-between gap-4 flex-wrap transition-all">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-white/20">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-black/5 dark:ring-white/20">
             <ScanLine className="w-6 h-6 text-slate-950" />
           </div>
           <div>
-            <h1 className="text-lg font-semibold tracking-tight text-white flex items-center gap-2.5">
+            <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
               Cattle Biometric Verification
-              <span className="text-[10px] font-medium tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 font-mono">
+              <span className="text-[10px] font-medium tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 dark:border-emerald-500/25 font-mono">
                 ArcFace &bull; 512-D GeM
               </span>
             </h1>
-            <p className="text-xs text-slate-400 mt-0.5 font-normal">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-normal">
               Compare 2 cattle videos across 5 temporal muzzle frames with deep ArcFace embeddings &amp; 10-D ridge minutiae.
             </p>
           </div>
@@ -491,7 +491,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
         {matchResult && (
           <button
             onClick={handleReset}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-white/[0.05] hover:bg-white/[0.08] border border-white/[0.08] text-slate-300 hover:text-white transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-black/[0.04] hover:bg-black/[0.08] dark:bg-white/[0.05] dark:hover:bg-white/[0.08] border border-black/[0.06] dark:border-white/[0.08] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer"
             title="Reset videos and comparison"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -517,27 +517,27 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         
         {/* CARD VIDEO A (Reference) */}
-        <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
-          <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+        <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
+          <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
             <div className="flex items-center gap-2.5">
-              <span className="w-7 h-7 rounded-xl bg-emerald-500/15 text-emerald-300 font-bold flex items-center justify-center text-xs border border-emerald-500/30 font-mono shadow-xs">
+              <span className="w-7 h-7 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center text-xs border border-emerald-500/20 dark:border-emerald-500/30 font-mono shadow-xs">
                 A
               </span>
               <div>
-                <h3 className="text-xs font-semibold text-white tracking-tight">Video A (Reference Animal)</h3>
-                <span className="text-[11px] text-slate-400">Registered baseline cattle video</span>
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">Video A (Reference Animal)</h3>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Registered baseline cattle video</span>
               </div>
             </div>
 
             {/* Apple macOS-style Segmented Switch */}
-            <div className="flex items-center bg-slate-950/70 p-1 rounded-xl border border-white/[0.08] shadow-inner text-xs">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-950/70 p-1 rounded-xl border border-black/[0.06] dark:border-white/[0.08] shadow-inner text-xs">
               <button
                 type="button"
                 onClick={() => setInputModeA('sample')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                   inputModeA === 'sample'
-                    ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 Sample Library
@@ -547,8 +547,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 onClick={() => setInputModeA('upload')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                   inputModeA === 'upload'
-                    ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 Upload Video
@@ -558,15 +558,15 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
           {inputModeA === 'sample' ? (
             <div className="flex flex-col gap-1.5 text-xs">
-              <label className="text-slate-400 font-medium">Select Reference Video:</label>
+              <label className="text-slate-500 dark:text-slate-400 font-medium">Select Reference Video:</label>
               <div className="relative">
                 <select
                   value={videoA}
                   onChange={(e) => setVideoA(e.target.value)}
-                  className="w-full appearance-none bg-slate-950/60 border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 font-medium focus:outline-hidden focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
+                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
                 >
                   {availableVideos.map((v, i) => (
-                    <option key={i} value={v.path} className="bg-slate-900 text-slate-200">
+                    <option key={i} value={v.path} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
                       {v.label || v.name}
                     </option>
                   ))}
@@ -578,52 +578,52 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             </div>
           ) : (
             <div className="flex flex-col gap-2 text-xs">
-              <label className="text-slate-400 font-medium">Upload Reference MP4 Video:</label>
-              <label className="border border-dashed border-white/[0.12] hover:border-emerald-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-950/40 hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
-                <div className="w-9 h-9 rounded-xl bg-white/[0.04] group-hover:bg-emerald-500/10 flex items-center justify-center text-slate-400 group-hover:text-emerald-400 transition-colors">
+              <label className="text-slate-500 dark:text-slate-400 font-medium">Upload Reference MP4 Video:</label>
+              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-emerald-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
+                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-emerald-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
                   <Upload className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className="text-xs font-medium text-slate-300 group-hover:text-white transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
                     {uploadingA ? 'Uploading video...' : uploadedNameA ? uploadedNameA : 'Choose MP4 file or drag & drop'}
                   </span>
-                  <span className="text-[10px] text-slate-500 mt-0.5">H.264 / MP4 up to 50 MB</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">H.264 / MP4 up to 50 MB</span>
                 </div>
                 <input type="file" accept="video/mp4,video/*" onChange={handleFileUploadA} className="hidden" />
               </label>
             </div>
           )}
 
-          <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 bg-slate-950/50 px-3 py-2 rounded-xl border border-white/[0.05]">
-            <span className="text-slate-500 font-sans text-[11px]">Selected:</span>
-            <span className="text-emerald-300 font-medium truncate max-w-[220px]" title={videoA}>
+          <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-950/50 px-3 py-2 rounded-xl border border-black/[0.06] dark:border-white/[0.05]">
+            <span className="text-slate-400 dark:text-slate-500 font-sans text-[11px]">Selected:</span>
+            <span className="text-emerald-600 dark:text-emerald-300 font-medium truncate max-w-[220px]" title={videoA}>
               {videoA.split('/').pop()}
             </span>
           </div>
         </div>
 
         {/* CARD VIDEO B (Query Candidate) */}
-        <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
-          <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+        <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
+          <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
             <div className="flex items-center gap-2.5">
-              <span className="w-7 h-7 rounded-xl bg-teal-500/15 text-teal-300 font-bold flex items-center justify-center text-xs border border-teal-500/30 font-mono shadow-xs">
+              <span className="w-7 h-7 rounded-xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold flex items-center justify-center text-xs border border-teal-500/25 dark:border-teal-500/30 font-mono shadow-xs">
                 B
               </span>
               <div>
-                <h3 className="text-xs font-semibold text-white tracking-tight">Video B (Query Candidate)</h3>
-                <span className="text-[11px] text-slate-400">Target video to compare against A</span>
+                <h3 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">Video B (Query Candidate)</h3>
+                <span className="text-[11px] text-slate-500 dark:text-slate-400">Target video to compare against A</span>
               </div>
             </div>
 
             {/* Apple macOS-style Segmented Switch */}
-            <div className="flex items-center bg-slate-950/70 p-1 rounded-xl border border-white/[0.08] shadow-inner text-xs">
+            <div className="flex items-center bg-slate-100 dark:bg-slate-950/70 p-1 rounded-xl border border-black/[0.06] dark:border-white/[0.08] shadow-inner text-xs">
               <button
                 type="button"
                 onClick={() => setInputModeB('sample')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                   inputModeB === 'sample'
-                    ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 Sample Library
@@ -633,8 +633,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 onClick={() => setInputModeB('upload')}
                 className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
                   inputModeB === 'upload'
-                    ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 Upload Video
@@ -644,15 +644,15 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
           {inputModeB === 'sample' ? (
             <div className="flex flex-col gap-1.5 text-xs">
-              <label className="text-slate-400 font-medium">Select Candidate Video:</label>
+              <label className="text-slate-500 dark:text-slate-400 font-medium">Select Candidate Video:</label>
               <div className="relative">
                 <select
                   value={videoB}
                   onChange={(e) => setVideoB(e.target.value)}
-                  className="w-full appearance-none bg-slate-950/60 border border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-200 font-medium focus:outline-hidden focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/30 transition-all cursor-pointer"
+                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/30 transition-all cursor-pointer"
                 >
                   {availableVideos.map((v, i) => (
-                    <option key={i} value={v.path} className="bg-slate-900 text-slate-200">
+                    <option key={i} value={v.path} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
                       {v.label || v.name}
                     </option>
                   ))}
@@ -664,25 +664,25 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
             </div>
           ) : (
             <div className="flex flex-col gap-2 text-xs">
-              <label className="text-slate-400 font-medium">Upload Candidate MP4 Video:</label>
-              <label className="border border-dashed border-white/[0.12] hover:border-teal-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-950/40 hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
-                <div className="w-9 h-9 rounded-xl bg-white/[0.04] group-hover:bg-teal-500/10 flex items-center justify-center text-slate-400 group-hover:text-teal-400 transition-colors">
+              <label className="text-slate-500 dark:text-slate-400 font-medium">Upload Candidate MP4 Video:</label>
+              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-teal-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
+                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-teal-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
                   <Upload className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col items-center">
-                  <span className="text-xs font-medium text-slate-300 group-hover:text-white transition-colors">
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white transition-colors">
                     {uploadingB ? 'Uploading video...' : uploadedNameB ? uploadedNameB : 'Choose MP4 file or drag & drop'}
                   </span>
-                  <span className="text-[10px] text-slate-500 mt-0.5">H.264 / MP4 up to 50 MB</span>
+                  <span className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">H.264 / MP4 up to 50 MB</span>
                 </div>
                 <input type="file" accept="video/mp4,video/*" onChange={handleFileUploadB} className="hidden" />
               </label>
             </div>
           )}
 
-          <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 bg-slate-950/50 px-3 py-2 rounded-xl border border-white/[0.05]">
-            <span className="text-slate-500 font-sans text-[11px]">Selected:</span>
-            <span className="text-teal-300 font-medium truncate max-w-[220px]" title={videoB}>
+          <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-950/50 px-3 py-2 rounded-xl border border-black/[0.06] dark:border-white/[0.05]">
+            <span className="text-slate-400 dark:text-slate-500 font-sans text-[11px]">Selected:</span>
+            <span className="text-teal-600 dark:text-teal-300 font-medium truncate max-w-[220px]" title={videoB}>
               {videoB.split('/').pop()}
             </span>
           </div>
@@ -690,30 +690,30 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       </div>
 
       {/* QUICK PRESET PAIRS */}
-      <div className="flex items-center justify-between flex-wrap gap-2.5 text-xs text-slate-400 px-1">
-        <span className="flex items-center gap-1.5 font-medium text-slate-300">
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+      <div className="flex items-center justify-between flex-wrap gap-2.5 text-xs text-slate-500 dark:text-slate-400 px-1">
+        <span className="flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300">
+          <Sparkles className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
           <span>Quick Test Pairs:</span>
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo.mp4')}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-medium transition-all cursor-pointer text-xs"
+            className="px-3 py-1.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 dark:border-emerald-500/30 font-medium transition-all cursor-pointer text-xs"
           >
             🟢 Same Cattle Self-Test (Video 1 vs Video 1)
           </button>
           <button
             type="button"
             onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo2.mp4')}
-            className="px-3 py-1.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] text-slate-200 border border-white/[0.08] font-medium transition-all cursor-pointer text-xs"
+            className="px-3 py-1.5 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] text-slate-700 dark:text-slate-200 border border-black/[0.06] dark:border-white/[0.08] font-medium transition-all cursor-pointer text-xs"
           >
             🔍 Same Cattle Cross-Take (Video 1 vs Video 2)
           </button>
           <button
             type="button"
             onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo3.mp4')}
-            className="px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/25 font-medium transition-all cursor-pointer text-xs"
+            className="px-3 py-1.5 rounded-xl bg-rose-500/10 dark:bg-rose-500/15 hover:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/25 dark:border-rose-500/30 font-medium transition-all cursor-pointer text-xs"
           >
             🔴 Different Cattle (Video 1 vs Video 3)
           </button>
