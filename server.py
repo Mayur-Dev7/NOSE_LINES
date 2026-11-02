@@ -121,6 +121,8 @@ from video_groove_extractor import (
     compute_cosine_similarity,
 )
 from muzzle_matcher import (
+    enhance_muzzle_image,
+    compare_two_muzzles,
     match_sift_ransac,
     match_minutiae,
     match_muzzle_frame_sets,
@@ -1244,6 +1246,164 @@ class CosineSimilarityRequest(BaseModel):
     graph_match_threshold: Optional[float] = None
     device: Optional[str] = "cpu"
     cpu_cores: Optional[int] = 6
+    crop_a_path: Optional[str] = None
+    crop_b_path: Optional[str] = None
+    frames_a: Optional[List[Dict[str, Any]]] = None
+    frames_b: Optional[List[Dict[str, Any]]] = None
+    orb_threshold: Optional[int] = 35
+
+
+def execute_secondary_orb_verification(
+    crop_a_path: Optional[str] = None,
+    crop_b_path: Optional[str] = None,
+    frames_a: Optional[List[Dict[str, Any]]] = None,
+    frames_b: Optional[List[Dict[str, Any]]] = None,
+    threshold: int = 35,
+    output_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """
+    Executes secondary classical ORB keypoint & Lowe's ratio matching (Mask_RCNN / statusprint.py method).
+    Compares the highest quality or canonically aligned muzzle crops between two cattle video sets.
+    """
+    if output_dir is None:
+        output_dir = OUTPUT_DIR / f"secondary_orb_{int(time.time()*1000)}"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cand_a = []
+    if crop_a_path and Path(crop_a_path).exists():
+        cand_a.append(Path(crop_a_path))
+    if frames_a:
+        for f in frames_a:
+            p_enh = f.get("enhanced_path")
+            p_crop = f.get("crop_path")
+            if p_enh and Path(p_enh).exists():
+                cand_a.append(Path(p_enh))
+            elif p_crop and Path(p_crop).exists():
+                cand_a.append(Path(p_crop))
+
+    cand_b = []
+    if crop_b_path and Path(crop_b_path).exists():
+        cand_b.append(Path(crop_b_path))
+    if frames_b:
+        for f in frames_b:
+            p_enh = f.get("enhanced_path")
+            p_crop = f.get("crop_path")
+            if p_enh and Path(p_enh).exists():
+                cand_b.append(Path(p_enh))
+            elif p_crop and Path(p_crop).exists():
+                cand_b.append(Path(p_crop))
+
+    if not cand_a or not cand_b:
+        return {
+            "executed": False,
+            "error": "No valid crop image files found for Video A or Video B",
+            "good_matches": 0,
+            "threshold": threshold,
+            "is_match": False,
+            "verdict": "UNAVAILABLE",
+        }
+
+    best_res = None
+    best_matches = -1
+    best_pair_paths = (None, None)
+
+    for pa in cand_a[:3]:
+        img_a = cv2.imread(str(pa))
+        if img_a is None:
+            continue
+        if img_a.shape[:2] == (448, 448):
+            gray_a = cv2.cvtColor(img_a, cv2.COLOR_BGR2GRAY) if img_a.ndim == 3 else img_a
+            up_a = img_a if img_a.ndim == 3 else cv2.cvtColor(img_a, cv2.COLOR_GRAY2BGR)
+        else:
+            gray_a, up_a = enhance_muzzle_image(img_a, method="lanczos4", scale_factor=2, unsharp=True, clahe=True)
+
+        for pb in cand_b[:3]:
+            img_b = cv2.imread(str(pb))
+            if img_b is None:
+                continue
+            if img_b.shape[:2] == (448, 448):
+                gray_b = cv2.cvtColor(img_b, cv2.COLOR_BGR2GRAY) if img_b.ndim == 3 else img_b
+                up_b = img_b if img_b.ndim == 3 else cv2.cvtColor(img_b, cv2.COLOR_GRAY2BGR)
+            else:
+                gray_b, up_b = enhance_muzzle_image(img_b, method="lanczos4", scale_factor=2, unsharp=True, clahe=True)
+
+            res = compare_two_muzzles(
+                gray1=gray_a,
+                gray2=gray_b,
+                nfeatures=1000,
+                threshold=threshold,
+                bgr1=up_a,
+                bgr2=up_b,
+                save_visual_path=None,
+            )
+            if res["good_matches"] > best_matches:
+                best_matches = res["good_matches"]
+                best_res = res
+                best_pair_paths = (pa, pb)
+
+    if best_res is None:
+        best_res = {
+            "good_matches": 0,
+            "threshold": threshold,
+            "is_match": False,
+            "verdict": "DIFFERENT_CATTLE",
+            "similarity_percent": 0.0,
+            "kp1_count": 0,
+            "kp2_count": 0,
+            "visual_path": None,
+        }
+
+    visual_diagram_path = output_dir / "secondary_orb_match_diagram.jpg"
+    if best_pair_paths[0] and best_pair_paths[1]:
+        img_a = cv2.imread(str(best_pair_paths[0]))
+        img_b = cv2.imread(str(best_pair_paths[1]))
+        if img_a is not None and img_b is not None:
+            if img_a.shape[:2] == (448, 448):
+                gray_a = cv2.cvtColor(img_a, cv2.COLOR_BGR2GRAY) if img_a.ndim == 3 else img_a
+                up_a = img_a if img_a.ndim == 3 else cv2.cvtColor(img_a, cv2.COLOR_GRAY2BGR)
+            else:
+                gray_a, up_a = enhance_muzzle_image(img_a, method="lanczos4", scale_factor=2, unsharp=True, clahe=True)
+
+            if img_b.shape[:2] == (448, 448):
+                gray_b = cv2.cvtColor(img_b, cv2.COLOR_BGR2GRAY) if img_b.ndim == 3 else img_b
+                up_b = img_b if img_b.ndim == 3 else cv2.cvtColor(img_b, cv2.COLOR_GRAY2BGR)
+            else:
+                gray_b, up_b = enhance_muzzle_image(img_b, method="lanczos4", scale_factor=2, unsharp=True, clahe=True)
+
+            best_res = compare_two_muzzles(
+                gray1=gray_a,
+                gray2=gray_b,
+                nfeatures=1000,
+                threshold=threshold,
+                bgr1=up_a,
+                bgr2=up_b,
+                save_visual_path=str(visual_diagram_path),
+            )
+
+    visual_url = None
+    if visual_diagram_path.exists():
+        rel = visual_diagram_path.relative_to(OUTPUT_DIR)
+        visual_url = f"/output/{rel}"
+
+    return {
+        "executed": True,
+        "method_name": "ORB Keypoints + Lowe's Ratio Hamming Matcher (statusprint.py / Mask_RCNN Method)",
+        "good_matches": int(best_res["good_matches"]),
+        "threshold": int(threshold),
+        "is_match": bool(best_res["is_match"]),
+        "verdict": best_res["verdict"],
+        "similarity_percent": float(best_res["similarity_percent"]),
+        "kp1_count": int(best_res.get("kp1_count", 0)),
+        "kp2_count": int(best_res.get("kp2_count", 0)),
+        "visual_path": str(visual_diagram_path) if visual_diagram_path.exists() else None,
+        "visual_url": visual_url,
+        "weights_used": str(WEIGHTS_PATH),
+        "weights_verified": WEIGHTS_PATH.exists(),
+        "tested_pair": {
+            "crop_a": best_pair_paths[0].name if best_pair_paths[0] else None,
+            "crop_b": best_pair_paths[1].name if best_pair_paths[1] else None,
+        }
+    }
 
 
 @app.post("/api/video/cosine-similarity")
@@ -1254,6 +1414,8 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
     (with Bray-Curtis magnitude penalty calibration) and Deep Learning Biometric
     Embeddings (ConvNeXt-Tiny / ResNet-50 Spatial GeM & ArcFace).
     Supports dual embeddings (mean and median pooling) with full backward compatibility.
+    When primary model indicates a match OR is inconclusive, executes secondary confirmation
+    via Mask_RCNN/statusprint.py ORB keypoint Lowe's ratio matcher.
     """
     t0 = time.perf_counter()
     try:
@@ -1278,6 +1440,95 @@ async def compute_cosine_similarity_endpoint(req: CosineSimilarityRequest):
             dl_median_b=req.dl_median_b,
             **kwargs,
         )
+
+        # Secondary verification logic from /home/adis_mayur/F_CODES/Mask_RCNN
+        dl_sim = float(res.get("dl_similarity_pct") or res.get("median_pooling_similarity_pct") or res.get("cosine_similarity", 0.0))
+        dl_verdict = str(res.get("dl_verdict") or res.get("verdict", ""))
+        match_thresh = float(req.dl_match_threshold or 70.0)
+        likely_thresh = float(req.dl_likely_threshold or 58.0)
+        is_dl_match = (dl_sim >= match_thresh) and ("DISTINCT" not in dl_verdict.upper())
+
+        is_not_confident = (
+            "INCONCLUSIVE" in dl_verdict.upper()
+            or "LIKELY" in dl_verdict.upper()
+            or "PARTIAL" in dl_verdict.upper()
+            or (likely_thresh <= dl_sim < match_thresh)
+            or (45.0 <= dl_sim < match_thresh)
+        )
+
+        should_run_secondary = is_dl_match or is_not_confident
+        has_crops = bool(req.crop_a_path or req.crop_b_path or req.frames_a or req.frames_b)
+
+        secondary_info = None
+        if should_run_secondary and has_crops:
+            trigger_reason = (
+                "CONFIRMED_MATCH_VERIFICATION" if is_dl_match
+                else "INCONCLUSIVE_ARBITRATION"
+            )
+            orb_out = execute_secondary_orb_verification(
+                crop_a_path=req.crop_a_path,
+                crop_b_path=req.crop_b_path,
+                frames_a=req.frames_a,
+                frames_b=req.frames_b,
+                threshold=req.orb_threshold or 35,
+            )
+            orb_out["trigger_reason"] = trigger_reason
+
+            orb_match = orb_out.get("is_match", False)
+            if is_dl_match and orb_match:
+                consensus_verdict = "CONFIRMED MATCH: Verified by both Deep ArcFace Embedding & ORB Keypoints"
+                consensus_badge = "emerald"
+                consensus_code = "FULL_MATCH_AGREEMENT"
+            elif is_dl_match and not orb_match:
+                consensus_verdict = "HIGH EMBEDDING SIMILARITY (ORB Keypoints < 35: Viewpoint Shift or Surface Deformation)"
+                consensus_badge = "teal"
+                consensus_code = "DEEP_MATCH_ORB_PENDING"
+            elif is_not_confident and orb_match:
+                consensus_verdict = "ARBITRATED MATCH: Primary Embedding Borderline, Confirmed Same Cattle by ORB Keypoints"
+                consensus_badge = "emerald"
+                consensus_code = "ORB_ARBITRATED_MATCH"
+            elif is_not_confident and not orb_match:
+                consensus_verdict = "DISTINCT ANIMAL: Primary Embedding Borderline, Confirmed Different by ORB Keypoints"
+                consensus_badge = "rose"
+                consensus_code = "ORB_ARBITRATED_DISTINCT"
+            else:
+                consensus_verdict = "DISTINCT: Both Methods Confirm Different Animals"
+                consensus_badge = "rose"
+                consensus_code = "FULL_DISTINCT"
+
+            secondary_info = {
+                "triggered": True,
+                "trigger_reason": trigger_reason,
+                "consensus_verdict": consensus_verdict,
+                "consensus_badge": consensus_badge,
+                "consensus_code": consensus_code,
+                "primary_model": {
+                    "name": "ConvNeXt-Tiny + SpatialPyramidGeM (ArcFace 512-D)",
+                    "similarity_pct": dl_sim,
+                    "verdict": dl_verdict,
+                    "is_match": is_dl_match,
+                },
+                "secondary_model": {
+                    "name": "Mask R-CNN + Lanczos-4 Sinc + CLAHE + ORB Lowe's Ratio (τ = 35)",
+                    "good_matches": orb_out["good_matches"],
+                    "threshold": orb_out["threshold"],
+                    "verdict": orb_out["verdict"],
+                    "is_match": orb_out["is_match"],
+                    "similarity_percent": orb_out["similarity_percent"],
+                    "visual_url": orb_out["visual_url"],
+                    "visual_path": orb_out["visual_path"],
+                    "tested_pair": orb_out.get("tested_pair", {}),
+                },
+                "raw_orb_output": orb_out,
+            }
+        else:
+            secondary_info = {
+                "triggered": False,
+                "trigger_reason": "NOT_TRIGGERED_PRIMARY_MODEL_CONFIDENT_DISTINCT" if not should_run_secondary else "NO_CROPS_PROVIDED",
+            }
+
+        res["secondary_verification"] = secondary_info
+
         t_sim_ms = (time.perf_counter() - t0) * 1000
         if "step_timings" not in res or not isinstance(res["step_timings"], dict):
             res["step_timings"] = {}

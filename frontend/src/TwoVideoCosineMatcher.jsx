@@ -22,7 +22,8 @@ import {
   RotateCcw,
   Check,
   Maximize2,
-  SlidersHorizontal
+  SlidersHorizontal,
+  ShieldCheck
 } from 'lucide-react';
 
 const FEATURE_LABELS = {
@@ -305,6 +306,11 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           dl_likely_threshold: Number((matchThreshold - 12.0).toFixed(1)),
           device: computeDevice,
           cpu_cores: cpuCores,
+          crop_a_path: extractedA.frames?.[0]?.crop_path || null,
+          crop_b_path: extractedB.frames?.[0]?.crop_path || null,
+          frames_a: extractedA.frames || [],
+          frames_b: extractedB.frames || [],
+          orb_threshold: 35,
         }),
       });
       const simData = await parseJsonResponse(resSim, 'Biometric consensus calculation');
@@ -1191,6 +1197,141 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               </div>
             </div>
           </div>
+
+          {/* ========================================================= */}
+          {/* DUAL-METHOD VERIFICATION & CONFIRMATION (Mask_RCNN ORB)    */}
+          {/* ========================================================= */}
+          {matchResult.secondary_verification && matchResult.secondary_verification.triggered && (
+            <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] flex-wrap gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400 border border-amber-500/30">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-semibold text-white tracking-tight flex items-center gap-2">
+                      Dual-Method Verification &amp; Confirmation Engine
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                        {matchResult.secondary_verification.trigger_reason === 'CONFIRMED_MATCH_VERIFICATION'
+                          ? 'Triggered: Match Confirmation Check'
+                          : 'Triggered: Inconclusive Tie-Breaker Arbitration'}
+                      </span>
+                    </h4>
+                    <span className="text-[11px] text-slate-400">
+                      Primary Deep Embedding Cross-Validated by Mask R-CNN &bull; Lanczos-4 Sinc SR &bull; ORB Keypoints &bull; Lowe's Ratio Matcher
+                    </span>
+                  </div>
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  Threshold: <code className="text-slate-200 font-bold">&ge; {matchResult.secondary_verification.secondary_model?.threshold || 35} good matches</code>
+                </div>
+              </div>
+
+              {/* Consensus Verdict Banner */}
+              <div className={`p-4 rounded-2xl border flex items-center justify-between gap-4 flex-wrap ${
+                matchResult.secondary_verification.consensus_badge === 'emerald'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : matchResult.secondary_verification.consensus_badge === 'teal'
+                  ? 'bg-teal-500/10 border-teal-500/30 text-teal-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}>
+                <div className="flex items-center gap-3">
+                  {matchResult.secondary_verification.consensus_badge === 'emerald' ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  ) : matchResult.secondary_verification.consensus_badge === 'teal' ? (
+                    <AlertCircle className="w-5 h-5 text-teal-400 shrink-0" />
+                  ) : (
+                    <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                  )}
+                  <div>
+                    <div className="text-xs font-bold text-white uppercase tracking-wider">Dual-Method Consensus:</div>
+                    <div className="text-sm font-semibold">{matchResult.secondary_verification.consensus_verdict}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Side-by-Side Model Comparison Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                {/* Method 1: Primary Deep Embedding */}
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-indigo-400 font-bold flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5" /> Method 1: Deep Embedding Model
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      matchResult.secondary_verification.primary_model?.is_match
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    }`}>
+                      {matchResult.secondary_verification.primary_model?.is_match ? 'MATCH' : 'NOT CONFIRMED'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Architecture: <strong>ConvNeXt-Tiny + SpatialPyramidGeM (ArcFace 512-D)</strong>
+                  </div>
+                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-white/[0.05]">
+                    <span className="text-slate-400">Embedding Similarity:</span>
+                    <span className="text-lg font-bold font-mono text-white">
+                      {matchResult.secondary_verification.primary_model?.similarity_pct?.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+
+                {/* Method 2: Mask R-CNN + ORB Statusprint Method */}
+                <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      <ScanLine className="w-3.5 h-3.5" /> Method 2: Mask R-CNN + ORB Matcher
+                    </span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                      matchResult.secondary_verification.secondary_model?.is_match
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                    }`}>
+                      {matchResult.secondary_verification.secondary_model?.is_match ? 'MATCH' : 'DIFFERENT'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Method: <strong>Lanczos-4 Sinc SR &bull; CLAHE &bull; ORB 1000 &bull; Lowe's Ratio (statusprint.py)</strong>
+                  </div>
+                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-white/[0.05]">
+                    <span className="text-slate-400">Good Matches (d1 &lt; 0.7&middot;d2):</span>
+                    <span className="text-lg font-bold font-mono text-white">
+                      {matchResult.secondary_verification.secondary_model?.good_matches}
+                      <span className="text-xs text-slate-400 font-normal"> / {matchResult.secondary_verification.secondary_model?.threshold || 35}</span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Visual Match Diagram Preview if Available */}
+              {matchResult.secondary_verification.secondary_model?.visual_url && (
+                <div className="mt-2 pt-3 border-t border-white/[0.06] flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      ORB Keypoint Visual Match Diagram:
+                    </span>
+                    <a
+                      href={matchResult.secondary_verification.secondary_model.visual_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-mono flex items-center gap-1"
+                    >
+                      Open Full Size &rarr;
+                    </a>
+                  </div>
+                  <div className="rounded-2xl overflow-hidden border border-white/[0.1] bg-black/60 max-h-72 flex items-center justify-center">
+                    <img
+                      src={matchResult.secondary_verification.secondary_model.visual_url}
+                      alt="ORB Keypoint Match Diagram"
+                      className="w-full object-contain max-h-72"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ========================================================= */}
           {/* 5. COLLAPSIBLE FRAME DETAILS ACCORDION                     */}

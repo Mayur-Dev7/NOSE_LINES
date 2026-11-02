@@ -605,88 +605,93 @@ export default function App() {
               </span>
             </button>
 
-            {/* Tab: 1-to-N Cattle Search & Embedder */}
-            <button
-              onClick={() => setActiveTab('one_to_n')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'one_to_n'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <Search className="w-3.5 h-3.5 text-indigo-400" />
-              <span>1-to-N Cattle Search & Embedder</span>
-              <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
-                activeTab === 'one_to_n' ? 'bg-indigo-500/25 text-indigo-300' : 'bg-white/[0.05] text-indigo-400'
-              }`}>
-                New
-              </span>
-            </button>
+            {/* Other navigation tabs commented out per user request */}
+            {false && (
+              <>
+                {/* Tab: 1-to-N Cattle Search & Embedder */}
+                <button
+                  onClick={() => setActiveTab('one_to_n')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeTab === 'one_to_n'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <Search className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>1-to-N Cattle Search & Embedder</span>
+                  <span className={`text-[9px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded-md ${
+                    activeTab === 'one_to_n' ? 'bg-indigo-500/25 text-indigo-300' : 'bg-white/[0.05] text-indigo-400'
+                  }`}>
+                    New
+                  </span>
+                </button>
 
-            {/* Groove Extraction Studio (nose_lines) */}
-            <button
-              onClick={() => setActiveTab('groove_studio')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'groove_studio'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <ScanLine className="w-3.5 h-3.5 text-teal-400" />
-              <span>Ridge Skeleton Studio</span>
-            </button>
+                {/* Groove Extraction Studio (nose_lines) */}
+                <button
+                  onClick={() => setActiveTab('groove_studio')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeTab === 'groove_studio'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <ScanLine className="w-3.5 h-3.5 text-teal-400" />
+                  <span>Ridge Skeleton Studio</span>
+                </button>
 
-            {/* Tab: Multi-Image Reference Builder */}
-            <button
-              onClick={() => setActiveTab('multi_template')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
-                activeTab === 'multi_template'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Consensus Template Builder</span>
-            </button>
+                {/* Tab: Multi-Image Reference Builder */}
+                <button
+                  onClick={() => setActiveTab('multi_template')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all ${
+                    activeTab === 'multi_template'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Consensus Template Builder</span>
+                </button>
 
-            {/* Tab 2: 2-Video Comparison (Legacy) */}
-            <button
-              onClick={() => setActiveTab('two_video')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
-                activeTab === 'two_video'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <GitCompare className="w-3.5 h-3.5" />
-              <span>Frame Matcher</span>
-            </button>
+                {/* Tab 2: 2-Video Comparison (Legacy) */}
+                <button
+                  onClick={() => setActiveTab('two_video')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
+                    activeTab === 'two_video'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <GitCompare className="w-3.5 h-3.5" />
+                  <span>Frame Matcher</span>
+                </button>
 
-            {/* Tab 3: Single-Video Frame Extraction */}
-            <button
-              onClick={() => setActiveTab('viewer')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
-                activeTab === 'viewer'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <Activity className="w-3.5 h-3.5" />
-              <span>Frame Cropper</span>
-            </button>
+                {/* Tab 3: Single-Video Frame Extraction */}
+                <button
+                  onClick={() => setActiveTab('viewer')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
+                    activeTab === 'viewer'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Frame Cropper</span>
+                </button>
 
-            {/* Tab 4: Hardware Benchmark */}
-            <button
-              onClick={() => setActiveTab('benchmark')}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
-                activeTab === 'benchmark'
-                  ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span>Benchmark</span>
-            </button>
+                {/* Tab 4: Hardware Benchmark */}
+                <button
+                  onClick={() => setActiveTab('benchmark')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all ${
+                    activeTab === 'benchmark'
+                      ? 'bg-white/10 text-white shadow-sm border border-white/15 backdrop-blur-md'
+                      : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <BarChart3 className="w-3.5 h-3.5" />
+                  <span>Benchmark</span>
+                </button>
+              </>
+            )}
           </div>
 
           <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
@@ -698,14 +703,15 @@ export default function App() {
         {/* ========================================================= */}
         {/* PRIMARY TAB: 2-VIDEO 5-IMAGE COSINE MATCHER               */}
         {/* ========================================================= */}
-        {activeTab === 'two_video_cosine' && (
-          <TwoVideoCosineMatcher sampleVideos={status?.sample_videos || []} />
-        )}
+        <TwoVideoCosineMatcher sampleVideos={status?.sample_videos || []} />
 
-        {/* ========================================================= */}
-        {/* TAB: 1-TO-N CATTLE BIOMETRIC SEARCH & EMBEDDER            */}
-        {/* ========================================================= */}
-        {activeTab === 'one_to_n' && (
+        {/* Other pages commented out per user request */}
+        {false && (
+          <>
+            {/* ========================================================= */}
+            {/* TAB: 1-TO-N CATTLE BIOMETRIC SEARCH & EMBEDDER            */}
+            {/* ========================================================= */}
+            {activeTab === 'one_to_n' && (
           <SingleVideoEmbeddingMatcher sampleVideos={status?.sample_videos || []} />
         )}
 
@@ -2137,6 +2143,8 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+          </>
         )}
       </main>
 
