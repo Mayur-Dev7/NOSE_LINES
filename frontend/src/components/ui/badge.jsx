@@ -14,12 +14,12 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/20",
         outline: "border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-200",
-        emerald:
-          "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 font-mono",
+        blue:
+          "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-400 font-mono",
         cyan:
           "border-cyan-500/25 bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 font-mono",
-        blue:
-          "border-blue-500/25 bg-blue-500/10 text-blue-700 dark:text-blue-400",
+        sky:
+          "border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-400 font-mono",
         purple:
           "border-purple-500/25 bg-purple-500/10 text-purple-700 dark:text-purple-400 font-mono",
       },

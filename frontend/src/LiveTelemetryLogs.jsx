@@ -74,38 +74,38 @@ export default function LiveTelemetryLogs({
     const l = (level || '').toUpperCase();
     const m = (msg || '').toLowerCase();
     if (m.includes('gpu') || m.includes('cuda') || m.includes('tensor')) {
-      return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40';
+      return 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-500/40';
     }
     if (l === 'ERROR') {
-      return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+      return 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40';
     }
     if (l === 'WARNING') {
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+      return 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-500/40';
     }
     if (m.includes('completed') || m.includes('success') || m.includes('early exit')) {
-      return 'bg-teal-500/20 text-teal-300 border-teal-500/40';
+      return 'bg-sky-500/20 text-sky-700 dark:text-sky-300 border-sky-500/40';
     }
-    return 'bg-blue-500/20 text-blue-300 border-blue-500/30';
+    return 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border-indigo-500/30';
   };
 
   return (
-    <div className={`backdrop-blur-2xl bg-slate-950/85 border border-white/[0.08] shadow-2xl shadow-black/60 rounded-3xl overflow-hidden transition-all relative ${className}`}>
+    <div className={`backdrop-blur-2xl bg-white/90 dark:bg-slate-950/85 border border-black/[0.08] dark:border-white/[0.08] shadow-2xl shadow-black/10 dark:shadow-black/60 rounded-3xl overflow-hidden transition-all relative ${className}`}>
       {/* Top macOS-style Terminal Bar */}
-      <div className="flex items-center justify-between px-4 py-3 bg-slate-900/80 border-b border-white/[0.06] select-none flex-wrap gap-2">
+      <div className="flex items-center justify-between px-4 py-3 bg-slate-100 dark:bg-slate-900/80 border-b border-black/[0.06] dark:border-white/[0.06] select-none flex-wrap gap-2">
         <div className="flex items-center gap-3">
           {/* Mac window dots */}
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-rose-500/70 inline-block" />
             <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70 inline-block" />
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70 inline-block" />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500/70 inline-block" />
           </div>
 
           <div className="flex items-center gap-2">
-            <Terminal className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-semibold text-slate-200 tracking-tight font-sans">
+            <Terminal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
+            <span className="text-xs font-semibold text-slate-900 dark:text-slate-200 tracking-tight font-sans">
               Live Biometric Telemetry &amp; System Execution Logs
             </span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-slate-400">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-black/[0.05] dark:bg-white/[0.06] border border-black/[0.08] dark:border-white/[0.08] text-slate-600 dark:text-slate-400">
               {logs.length} events
             </span>
           </div>
@@ -114,13 +114,13 @@ export default function LiveTelemetryLogs({
         {/* Right side live status & actions */}
         <div className="flex items-center gap-2">
           {isProcessing ? (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-blue-500/15 border border-blue-500/30 text-blue-700 dark:text-blue-300 text-[11px] font-mono">
+              <span className="w-2 h-2 rounded-full bg-blue-500 dark:bg-blue-400 animate-ping" />
               <span>LIVE RUNNING: {elapsedSeconds.toFixed(1)}s</span>
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800/80 border border-white/[0.06] text-slate-400 text-[11px] font-mono">
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-200 dark:bg-slate-800/80 border border-black/[0.06] dark:border-white/[0.06] text-slate-600 dark:text-slate-400 text-[11px] font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-slate-500" />
               <span>STANDBY</span>
             </div>
           )}
@@ -131,8 +131,8 @@ export default function LiveTelemetryLogs({
             onClick={() => setAutoScroll(!autoScroll)}
             className={`text-[10px] font-mono px-2 py-1 rounded-lg border transition-all ${
               autoScroll
-                ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40'
-                : 'bg-white/[0.04] text-slate-400 border-transparent hover:text-slate-200'
+                ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-500/40'
+                : 'bg-black/[0.04] dark:bg-white/[0.04] text-slate-500 dark:text-slate-400 border-transparent hover:text-slate-900 dark:hover:text-slate-200'
             }`}
             title="Auto-scroll to latest log line"
           >
@@ -144,10 +144,10 @@ export default function LiveTelemetryLogs({
             type="button"
             onClick={handleCopyLogs}
             disabled={logs.length === 0}
-            className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 transition-all border border-white/[0.04] disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all border border-black/[0.04] dark:border-white/[0.04] disabled:opacity-30 disabled:cursor-not-allowed"
             title="Copy logs to clipboard"
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
 
           {/* Clear logs */}

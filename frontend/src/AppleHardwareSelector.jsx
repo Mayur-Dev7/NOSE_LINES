@@ -24,7 +24,7 @@ export default function AppleHardwareSelector({
       {/* Subtle background ambient light */}
       <div
         className={`absolute -top-20 -right-20 w-56 h-56 rounded-full blur-3xl pointer-events-none transition-all duration-700 ${
-          isGpu ? 'bg-emerald-500/10' : 'bg-cyan-500/10'
+          isGpu ? 'bg-blue-500/10' : 'bg-cyan-500/10'
         }`}
       />
 
@@ -33,7 +33,7 @@ export default function AppleHardwareSelector({
         <div className="flex items-center gap-3">
           <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-all ${
             isGpu
-              ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)]'
+              ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
               : 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.15)]'
           }`}>
             {isGpu ? <Zap className="w-4 h-4" /> : <Cpu className="w-4 h-4" />}
@@ -45,7 +45,7 @@ export default function AppleHardwareSelector({
               </h3>
               <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border transition-all ${
                 isGpu
-                  ? 'bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+                  ? 'bg-blue-500/10 dark:bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30'
                   : 'bg-cyan-500/10 dark:bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30'
               }`}>
                 {isGpu ? 'CUDA 12.x Active' : `Ryzen C++ (${cpuCores}T)`}
@@ -59,9 +59,9 @@ export default function AppleHardwareSelector({
 
         {/* Live Active Engine Latency Badge */}
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950/70 border border-black/[0.06] dark:border-white/[0.06] text-xs font-mono shadow-xs">
-          <span className={`w-1.5 h-1.5 rounded-full ${isGpu ? 'bg-emerald-500 dark:bg-emerald-400 animate-pulse' : 'bg-cyan-500 dark:bg-cyan-400'}`} />
+          <span className={`w-1.5 h-1.5 rounded-full ${isGpu ? 'bg-blue-500 dark:bg-blue-400 animate-pulse' : 'bg-cyan-500 dark:bg-cyan-400'}`} />
           <span className="text-slate-500 dark:text-slate-400 font-sans text-[11px]">Throughput:</span>
-          <strong className={isGpu ? 'text-emerald-600 dark:text-emerald-300' : 'text-cyan-600 dark:text-cyan-300'}>
+          <strong className={isGpu ? 'text-blue-600 dark:text-blue-400' : 'text-cyan-600 dark:text-cyan-300'}>
             {isGpu ? '⚡ ~420 ms / video' : `⚡ ${selectedCpuOption.est} / video`}
           </strong>
         </div>
@@ -77,7 +77,7 @@ export default function AppleHardwareSelector({
           onClick={() => setDevice('gpu')}
           className={`flex items-center justify-between p-3 rounded-xl transition-all cursor-pointer text-left relative overflow-hidden group ${
             isGpu
-              ? 'bg-white dark:bg-gradient-to-r dark:from-emerald-500/15 dark:via-teal-500/10 dark:to-transparent border border-emerald-500/30 dark:border-emerald-500/40 text-slate-900 dark:text-white shadow-sm dark:shadow-[0_0_20px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/20'
+              ? 'bg-white dark:bg-gradient-to-r dark:from-blue-500/15 dark:via-indigo-500/10 dark:to-transparent border border-blue-500/30 dark:border-blue-500/40 text-slate-900 dark:text-white shadow-sm dark:shadow-[0_0_20px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/20'
               : 'hover:bg-black/[0.03] dark:hover:bg-white/[0.04] text-slate-500 dark:text-slate-400 border border-transparent'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
@@ -86,7 +86,7 @@ export default function AppleHardwareSelector({
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-slate-900 dark:text-white">GPU: NVIDIA GeForce RTX 3050 Laptop GPU</span>
-                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded-md bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
                   Ultra Fast
                 </span>
               </div>
@@ -96,7 +96,7 @@ export default function AppleHardwareSelector({
             </div>
           </div>
           {isGpu && (
-            <div className="w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-500/30 shrink-0">
+            <div className="w-5 h-5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 flex items-center justify-center border border-blue-500/30 shrink-0">
               <Check className="w-3 h-3 stroke-[3]" />
             </div>
           )}
@@ -166,7 +166,7 @@ export default function AppleHardwareSelector({
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-semibold">{opt.label}</span>
                     {opt.isRecommended && (
-                      <span className="text-[8px] font-bold uppercase tracking-wider px-1 py-0.2 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                      <span className="text-[8px] font-bold uppercase tracking-wider px-1 py-0.2 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30">
                         Rec
                       </span>
                     )}

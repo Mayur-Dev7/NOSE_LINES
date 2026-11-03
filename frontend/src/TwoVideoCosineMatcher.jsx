@@ -472,13 +472,13 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       {/* ========================================================= */}
       <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-6 rounded-3xl flex items-center justify-between gap-4 flex-wrap transition-all">
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 via-teal-400 to-cyan-400 flex items-center justify-center text-slate-950 font-bold shadow-lg shadow-emerald-500/20 ring-1 ring-black/5 dark:ring-white/20">
-            <ScanLine className="w-6 h-6 text-slate-950" />
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 flex items-center justify-center text-white font-bold shadow-lg shadow-blue-500/25 ring-1 ring-black/5 dark:ring-white/20">
+            <ScanLine className="w-6 h-6 text-white" />
           </div>
           <div>
             <h1 className="text-lg font-semibold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
               Cattle Biometric Verification
-              <span className="text-[10px] font-medium tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20 dark:border-emerald-500/25 font-mono">
+              <span className="text-[10px] font-medium tracking-wide uppercase px-2.5 py-0.5 rounded-full bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/20 dark:border-blue-500/30 font-mono">
                 ArcFace &bull; 512-D GeM
               </span>
             </h1>
@@ -520,7 +520,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
         <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
           <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
             <div className="flex items-center gap-2.5">
-              <span className="w-7 h-7 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center text-xs border border-emerald-500/20 dark:border-emerald-500/30 font-mono shadow-xs">
+              <span className="w-7 h-7 rounded-xl bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-bold flex items-center justify-center text-xs border border-blue-500/20 dark:border-blue-500/30 font-mono shadow-xs">
                 A
               </span>
               <div>
@@ -563,7 +563,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 <select
                   value={videoA}
                   onChange={(e) => setVideoA(e.target.value)}
-                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-emerald-500/50 focus:ring-1 focus:ring-emerald-500/30 transition-all cursor-pointer"
+                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/30 transition-all cursor-pointer"
                 >
                   {availableVideos.map((v, i) => (
                     <option key={i} value={v.path} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
@@ -579,8 +579,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           ) : (
             <div className="flex flex-col gap-2 text-xs">
               <label className="text-slate-500 dark:text-slate-400 font-medium">Upload Reference MP4 Video:</label>
-              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-emerald-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
-                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-emerald-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-blue-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
+                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-blue-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
                   <Upload className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col items-center">
@@ -596,7 +596,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
           <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-950/50 px-3 py-2 rounded-xl border border-black/[0.06] dark:border-white/[0.05]">
             <span className="text-slate-400 dark:text-slate-500 font-sans text-[11px]">Selected:</span>
-            <span className="text-emerald-600 dark:text-emerald-300 font-medium truncate max-w-[220px]" title={videoA}>
+            <span className="text-blue-600 dark:text-blue-400 font-medium truncate max-w-[220px]" title={videoA}>
               {videoA.split('/').pop()}
             </span>
           </div>
@@ -606,7 +606,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
         <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4 relative overflow-hidden transition-all">
           <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
             <div className="flex items-center gap-2.5">
-              <span className="w-7 h-7 rounded-xl bg-teal-500/10 dark:bg-teal-500/15 text-teal-700 dark:text-teal-300 font-bold flex items-center justify-center text-xs border border-teal-500/25 dark:border-teal-500/30 font-mono shadow-xs">
+              <span className="w-7 h-7 rounded-xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 font-bold flex items-center justify-center text-xs border border-indigo-500/25 dark:border-indigo-500/30 font-mono shadow-xs">
                 B
               </span>
               <div>
@@ -649,7 +649,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 <select
                   value={videoB}
                   onChange={(e) => setVideoB(e.target.value)}
-                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-teal-500/50 focus:ring-1 focus:ring-teal-500/30 transition-all cursor-pointer"
+                  className="w-full appearance-none bg-slate-50 dark:bg-slate-950/60 border border-black/[0.08] dark:border-white/[0.08] rounded-xl px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-200 font-medium focus:outline-hidden focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/30 transition-all cursor-pointer"
                 >
                   {availableVideos.map((v, i) => (
                     <option key={i} value={v.path} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200">
@@ -665,8 +665,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           ) : (
             <div className="flex flex-col gap-2 text-xs">
               <label className="text-slate-500 dark:text-slate-400 font-medium">Upload Candidate MP4 Video:</label>
-              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-teal-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
-                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-teal-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors">
+              <label className="border border-dashed border-black/[0.12] dark:border-white/[0.12] hover:border-indigo-500/50 rounded-2xl p-4 text-center cursor-pointer bg-slate-50 dark:bg-slate-950/40 hover:bg-slate-100 dark:hover:bg-slate-950/60 flex flex-col items-center justify-center gap-2 transition-all group">
+                <div className="w-9 h-9 rounded-xl bg-black/[0.04] dark:bg-white/[0.04] group-hover:bg-indigo-500/10 flex items-center justify-center text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
                   <Upload className="w-4 h-4" />
                 </div>
                 <div className="flex flex-col items-center">
@@ -682,7 +682,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
           <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-950/50 px-3 py-2 rounded-xl border border-black/[0.06] dark:border-white/[0.05]">
             <span className="text-slate-400 dark:text-slate-500 font-sans text-[11px]">Selected:</span>
-            <span className="text-teal-600 dark:text-teal-300 font-medium truncate max-w-[220px]" title={videoB}>
+            <span className="text-indigo-600 dark:text-indigo-400 font-medium truncate max-w-[220px]" title={videoB}>
               {videoB.split('/').pop()}
             </span>
           </div>
@@ -692,16 +692,16 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       {/* QUICK PRESET PAIRS */}
       <div className="flex items-center justify-between flex-wrap gap-2.5 text-xs text-slate-500 dark:text-slate-400 px-1">
         <span className="flex items-center gap-1.5 font-medium text-slate-600 dark:text-slate-300">
-          <Sparkles className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" />
+          <Sparkles className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
           <span>Quick Test Pairs:</span>
         </span>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => applyPreset('/home/adis_mayur/F_CODES/muzzleVideo.mp4', '/home/adis_mayur/F_CODES/muzzleVideo.mp4')}
-            className="px-3 py-1.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 hover:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/25 dark:border-emerald-500/30 font-medium transition-all cursor-pointer text-xs"
+            className="px-3 py-1.5 rounded-xl bg-blue-500/10 dark:bg-blue-500/15 hover:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/25 dark:border-blue-500/30 font-medium transition-all cursor-pointer text-xs"
           >
-            🟢 Same Cattle Self-Test (Video 1 vs Video 1)
+            🔵 Same Cattle Self-Test (Video 1 vs Video 1)
           </button>
           <button
             type="button"
@@ -729,18 +729,18 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           disabled={processing}
           className={`w-full py-4 px-6 rounded-2xl font-semibold text-xs tracking-wider uppercase flex items-center justify-center gap-2.5 transition-all shadow-xl cursor-pointer ${
             processing
-              ? 'bg-slate-800 text-slate-400 cursor-not-allowed border border-white/[0.08]'
-              : 'bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-400 hover:opacity-95 text-slate-950 shadow-emerald-500/25 active:scale-[0.99]'
+              ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 dark:text-slate-500 cursor-not-allowed border border-black/[0.06] dark:border-white/[0.08]'
+              : 'bg-[#0071e3] hover:bg-[#0077ed] active:bg-[#0062c4] text-white shadow-blue-500/25 active:scale-[0.99]'
           }`}
         >
           {processing ? (
             <>
-              <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+              <RefreshCw className="w-4 h-4 animate-spin text-white" />
               <span>Analyzing Temporal Frames...</span>
             </>
           ) : (
             <>
-              <Zap className="w-4 h-4 fill-slate-950" />
+              <Zap className="w-4 h-4 fill-white text-white" />
               <span>COMPARE 2 VIDEOS &amp; GET BIOMETRIC RESULT</span>
               <ArrowRight className="w-4 h-4" />
             </>
@@ -787,23 +787,23 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
       {matchResult && (
         <div id="biometric-results-view" className="flex flex-col gap-6 pt-2 animate-in fade-in duration-300">
           
-          {/* THE HERO VERDICT BANNER (3-Tier Status System: Green Match, Yellow Inconclusive, Red Distinct) */}
+          {/* THE HERO VERDICT BANNER (3-Tier Status System: Blue Match, Yellow Inconclusive, Red Distinct) */}
           <div className={`p-6 rounded-3xl border flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl relative overflow-hidden backdrop-blur-2xl transition-all ${
             isMatch
-              ? 'bg-gradient-to-br from-emerald-950/40 via-slate-900/60 to-slate-950/80 border-emerald-500/40 shadow-[0_0_30px_rgba(16,185,129,0.15)] ring-1 ring-emerald-500/20'
+              ? 'bg-blue-500/10 dark:bg-gradient-to-br dark:from-blue-950/40 dark:via-slate-900/60 dark:to-slate-950/80 border-blue-500/30 dark:border-blue-500/40 shadow-[0_0_30px_rgba(59,130,246,0.15)] ring-1 ring-blue-500/20'
               : isInconclusive
-              ? 'bg-gradient-to-br from-amber-950/40 via-slate-900/60 to-slate-950/80 border-amber-500/40 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20'
-              : 'bg-gradient-to-br from-rose-950/40 via-slate-900/60 to-slate-950/80 border-rose-500/40 shadow-[0_0_30px_rgba(244,63,94,0.15)] ring-1 ring-rose-500/20'
+              ? 'bg-amber-500/10 dark:bg-gradient-to-br dark:from-amber-950/40 dark:via-slate-900/60 dark:to-slate-950/80 border-amber-500/30 dark:border-amber-500/40 shadow-[0_0_30px_rgba(245,158,11,0.15)] ring-1 ring-amber-500/20'
+              : 'bg-rose-500/10 dark:bg-gradient-to-br dark:from-rose-950/40 dark:via-slate-900/60 dark:to-slate-950/80 border-rose-500/30 dark:border-rose-500/40 shadow-[0_0_30px_rgba(244,63,94,0.15)] ring-1 ring-rose-500/20'
           }`}>
             
             {/* Left: Verdict Status & Explanation */}
             <div className="flex items-center gap-4.5">
               <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 border transition-all ${
                 isMatch
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
+                  ? 'bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30 shadow-[0_0_20px_rgba(59,130,246,0.25)]'
                   : isInconclusive
-                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.25)]'
-                  : 'bg-rose-500/20 text-rose-400 border-rose-500/40 shadow-[0_0_20px_rgba(244,63,94,0.25)]'
+                  ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.25)]'
+                  : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 shadow-[0_0_20px_rgba(244,63,94,0.25)]'
               }`}>
                 {isMatch ? (
                   <CheckCircle2 className="w-8 h-8" />
@@ -818,19 +818,19 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 <div className="flex items-center gap-2 mb-1">
                   <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[11px] font-bold font-mono tracking-wide uppercase border ${
                     isMatch
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-xs'
+                      ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30 shadow-xs'
                       : isInconclusive
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-xs'
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30 shadow-xs'
+                      : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30 shadow-xs'
                   }`}>
                     <span className={`w-1.5 h-1.5 rounded-full ${
-                      isMatch ? 'bg-emerald-400' : isInconclusive ? 'bg-amber-400' : 'bg-rose-400'
+                      isMatch ? 'bg-blue-500 dark:bg-blue-400' : isInconclusive ? 'bg-amber-500 dark:bg-amber-400' : 'bg-rose-500 dark:bg-rose-400'
                     }`} />
                     {isMatch ? 'BIOMETRIC MATCH' : isInconclusive ? 'INCONCLUSIVE (NOT CONFIRMED)' : 'DISTINCT ANIMALS'}
                   </span>
                 </div>
                 
-                <h2 className="text-xl font-bold tracking-tight text-white">
+                <h2 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
                   {isMatch
                     ? 'Confirmed Same Cattle (Profile Match)'
                     : isInconclusive
@@ -838,7 +838,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                     : 'Different Cattle (Identity Rejected)'}
                 </h2>
 
-                <p className="text-xs text-slate-300/80 mt-1 max-w-xl font-normal leading-relaxed">
+                <p className="text-xs text-slate-600 dark:text-slate-300/80 mt-1 max-w-xl font-normal leading-relaxed">
                   {isMatch
                     ? `Video A (${matchResult.videoAName}) and Video B (${matchResult.videoBName}) share identical epidermal muzzle groove dermatoglyphics and feature vectors (Score: ${activeSim.toFixed(1)}% ≥ ${matchThreshold}%).`
                     : isInconclusive
@@ -881,27 +881,27 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               <div className="flex items-baseline gap-1 mt-1">
                 <span className={`text-4xl font-extrabold font-mono tracking-tight ${
                   isMatch
-                    ? 'text-emerald-400'
+                    ? 'text-blue-600 dark:text-blue-400'
                     : isLikely
-                    ? 'text-teal-400'
+                    ? 'text-sky-600 dark:text-sky-400'
                     : isInconclusive
-                    ? 'text-amber-400'
-                    : 'text-rose-400'
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-rose-600 dark:text-rose-400'
                 }`}>
                   {activeSim.toFixed(1)}%
                 </span>
               </div>
               
-              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400">
-                <span>L2 Distance: <strong className="text-slate-200">{activeL2}</strong></span>
+              <div className="flex items-center gap-2 text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                <span>L2 Distance: <strong className="text-slate-800 dark:text-slate-200">{activeL2}</strong></span>
                 {rawSim != null && (
                   <>
                     <span>&bull;</span>
-                    <span>Raw Cosine: <strong className="text-slate-300">{Number(rawSim).toFixed(1)}%</strong></span>
+                    <span>Raw Cosine: <strong className="text-slate-700 dark:text-slate-300">{Number(rawSim).toFixed(1)}%</strong></span>
                   </>
                 )}
                 <span>&bull;</span>
-                <span className="text-slate-400 font-sans">
+                <span className="text-slate-500 dark:text-slate-400 font-sans">
                   {primaryMetric === 'mean' ? 'Outlier-Pruned Mean' : '5-Frame Median'}
                 </span>
               </div>
@@ -909,49 +909,49 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           </div>
 
           {/* DYNAMIC CONFIDENCE THRESHOLD CONTROLLER (0 TO 100) */}
-          <div className="backdrop-blur-xl bg-slate-900/60 border border-white/[0.08] px-5 py-3.5 rounded-3xl flex items-center justify-between gap-4 flex-wrap shadow-lg">
+          <div className="backdrop-blur-xl bg-white/75 dark:bg-slate-900/60 border border-black/[0.06] dark:border-white/[0.08] px-5 py-3.5 rounded-3xl flex items-center justify-between gap-4 flex-wrap shadow-lg">
             <div className="flex items-center gap-3">
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 border transition-all ${
                 isMatch
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                  ? 'bg-blue-500/15 border-blue-500/30 text-blue-600 dark:text-blue-400'
                   : isInconclusive
-                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                  ? 'bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400'
+                  : 'bg-rose-500/15 border-rose-500/30 text-rose-600 dark:text-rose-400'
               }`}>
                 <SlidersHorizontal className="w-4 h-4" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-xs font-semibold text-white tracking-wide">Match Decision Threshold:</span>
+                  <span className="text-xs font-semibold text-slate-900 dark:text-white tracking-wide">Match Decision Threshold:</span>
                   <span className={`font-mono text-xs font-bold px-2 py-0.5 rounded-md border ${
                     isMatch
-                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30'
                       : isInconclusive
-                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
-                      : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                      ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                      : 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-500/30'
                   }`}>
                     &ge; {matchThreshold}% Match
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                     (Yellow: {Math.max(0, matchThreshold - 10)}%–{matchThreshold}%, Red: &lt; {Math.max(0, matchThreshold - 10)}%)
                   </span>
                 </div>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Full 0%–100% threshold range. Score is <strong className="text-white font-mono">{activeSim.toFixed(1)}%</strong> &rarr; Status is {isMatch ? <span className="text-emerald-400 font-semibold">MATCH (Green)</span> : isInconclusive ? <span className="text-amber-400 font-semibold">NOT CONFIRMED (Yellow)</span> : <span className="text-rose-400 font-semibold">DISTINCT (Red)</span>}.
+                <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  Full 0%–100% threshold range. Score is <strong className="text-slate-900 dark:text-white font-mono">{activeSim.toFixed(1)}%</strong> &rarr; Status is {isMatch ? <span className="text-blue-600 dark:text-blue-400 font-semibold">MATCH (Blue)</span> : isInconclusive ? <span className="text-amber-600 dark:text-amber-400 font-semibold">NOT CONFIRMED (Yellow)</span> : <span className="text-rose-600 dark:text-rose-400 font-semibold">DISTINCT (Red)</span>}.
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-3 ml-auto flex-wrap">
               {/* Score Mode Switch: Calibrated vs Raw */}
-              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-xl border border-white/[0.08] text-[10px]">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-950/80 p-0.5 rounded-xl border border-black/[0.06] dark:border-white/[0.08] text-[10px]">
                 <button
                   type="button"
                   onClick={() => setUseCalibrated(true)}
                   className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
                     useCalibrated
-                      ? 'bg-white/10 text-white border border-white/10 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white border border-black/[0.06] dark:border-white/10 shadow-xs'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                   title="Calibrated boosted biometric score (50% -> 60%)"
                 >
@@ -962,8 +962,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   onClick={() => setUseCalibrated(false)}
                   className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
                     !useCalibrated
-                      ? 'bg-white/10 text-white border border-white/10 shadow-xs'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white border border-black/[0.06] dark:border-white/10 shadow-xs'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                   title="Raw uncalibrated cosine dot product"
                 >
@@ -973,7 +973,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
               {/* Slider (Full 0% to 100% Range) */}
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono text-slate-500">0%</span>
+                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">0%</span>
                 <input
                   type="range"
                   min="0"
@@ -981,14 +981,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   step="1"
                   value={matchThreshold}
                   onChange={(e) => setMatchThreshold(Number(e.target.value))}
-                  className="w-32 sm:w-48 accent-emerald-400 cursor-pointer h-1.5 bg-slate-800 rounded-lg appearance-none"
+                  className="w-32 sm:w-48 accent-blue-600 dark:accent-blue-400 cursor-pointer h-1.5 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none"
                   title={`Adjust match threshold (currently ${matchThreshold}%)`}
                 />
-                <span className="text-[10px] font-mono text-slate-500">100%</span>
+                <span className="text-[10px] font-mono text-slate-400 dark:text-slate-500">100%</span>
               </div>
 
               {/* Quick Presets */}
-              <div className="flex items-center bg-slate-950/80 p-0.5 rounded-xl border border-white/[0.08]">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-950/80 p-0.5 rounded-xl border border-black/[0.06] dark:border-white/[0.08]">
                 {[
                   { label: '65%', val: 65 },
                   { label: '75%', val: 75 },
@@ -1001,8 +1001,8 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                     onClick={() => setMatchThreshold(p.val)}
                     className={`px-2 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
                       matchThreshold === p.val
-                        ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40 shadow-xs'
-                        : 'text-slate-400 hover:text-slate-200 border border-transparent'
+                        ? 'bg-blue-500/25 text-blue-700 dark:text-blue-300 border border-blue-500/40 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 border border-transparent'
                     }`}
                   >
                     {p.label}
@@ -1016,34 +1016,34 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             
             {/* CARD 1: DEEP LEARNING (CONVNEXT ARCFACE / GEM) */}
-            <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
-              <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+            <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-400 border border-indigo-500/30">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-500/15 flex items-center justify-center text-indigo-600 dark:text-indigo-400 border border-indigo-500/30">
                     <Cpu className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-white tracking-tight">
+                    <h4 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">
                       Deep Learning Biometric Model
                     </h4>
-                    <span className="text-[11px] text-slate-400">ConvNeXt ArcFace / GeM Pooling</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">ConvNeXt ArcFace / GeM Pooling</span>
                   </div>
                 </div>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-semibold">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30 font-semibold">
                   512-D
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 {/* 1. Outlier-Pruned Mean Match */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Outlier-Pruned Mean</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Outlier-Pruned Mean</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/25">
                       Inliers: {keptFrames}/5
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-white tracking-tight">
+                  <span className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                     {(meanSim ?? 0).toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1052,14 +1052,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 2. 5-Frame Median Match */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">5-Frame Median Match</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-white/[0.05] text-slate-300 border border-white/[0.08]">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">5-Frame Median Match</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-black/[0.05] dark:bg-white/[0.05] text-slate-600 dark:text-slate-300 border border-black/[0.08] dark:border-white/[0.08]">
                       p50
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-white tracking-tight">
+                  <span className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">
                     {medianSim.toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1068,14 +1068,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 3. Trimmed Cross-Frame Top-15 Match */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Trimmed Cross-Frame</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/25">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Trimmed Cross-Frame</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border border-cyan-500/25">
                       Top-15
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-cyan-300 tracking-tight">
+                  <span className="text-lg font-bold text-cyan-600 dark:text-cyan-300 tracking-tight">
                     {(trimmedCrossSim ?? 0).toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1084,14 +1084,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 4. Intra-Video Consistency & Latency */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Intra-Video Consistency</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/25">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Intra-Video Consistency</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/25">
                       Stable
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-teal-300 tracking-tight">
+                  <span className="text-lg font-bold text-teal-600 dark:text-teal-300 tracking-tight">
                     {intraConsistency.toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1101,44 +1101,44 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               </div>
 
               {matchResult.cross_matrix_stats && Object.keys(matchResult.cross_matrix_stats).length > 0 && (
-                <div className="p-2.5 rounded-xl bg-slate-950/40 border border-white/[0.04] flex items-center justify-between text-[11px] font-mono text-slate-400">
+                <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-950/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
                   <span className="text-slate-500 font-sans">5×5 Cross Matrix Range:</span>
                   <span>
-                    Min <strong className="text-slate-300">{matchResult.cross_matrix_stats.min_pair_similarity}%</strong> &bull; Median <strong className="text-slate-300">{matchResult.cross_matrix_stats.median_pair_similarity}%</strong> &bull; Max <strong className="text-emerald-400">{matchResult.cross_matrix_stats.max_pair_similarity}%</strong>
+                    Min <strong className="text-slate-700 dark:text-slate-300">{matchResult.cross_matrix_stats.min_pair_similarity}%</strong> &bull; Median <strong className="text-slate-700 dark:text-slate-300">{matchResult.cross_matrix_stats.median_pair_similarity}%</strong> &bull; Max <strong className="text-blue-600 dark:text-blue-400">{matchResult.cross_matrix_stats.max_pair_similarity}%</strong>
                   </span>
                 </div>
               )}
             </div>
 
             {/* CARD 2: CLASSICAL 10-D TOPOLOGICAL GRAPH BASELINE */}
-            <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
-              <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
+            <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06]">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/15 flex items-center justify-center text-emerald-400 border border-emerald-500/30">
+                  <div className="w-8 h-8 rounded-xl bg-sky-500/15 flex items-center justify-center text-sky-600 dark:text-sky-400 border border-sky-500/30">
                     <Network className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-white tracking-tight">
+                    <h4 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight">
                       Classical 10-D Topological Graph Baseline
                     </h4>
-                    <span className="text-[11px] text-slate-400">NetworkX Dermatoglyphic Minutiae</span>
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">NetworkX Dermatoglyphic Minutiae</span>
                   </div>
                 </div>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-semibold">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/30 font-semibold">
                   10 Invariants
                 </span>
               </div>
 
               <div className="grid grid-cols-2 gap-3 text-xs font-mono">
                 {/* 1. Calibrated Similarity */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Calibrated Similarity</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-500/25">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Calibrated Similarity</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/25">
                       Penalty
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-emerald-300 tracking-tight">
+                  <span className="text-lg font-bold text-sky-600 dark:text-sky-300 tracking-tight">
                     {classicalCalibrated.toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1147,14 +1147,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 2. Raw Unpenalized Cosine */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Raw Cosine</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-white/[0.05] text-slate-300 border border-white/[0.08]">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Raw Cosine</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-black/[0.05] dark:bg-white/[0.05] text-slate-600 dark:text-slate-300 border border-black/[0.08] dark:border-white/[0.08]">
                       Raw
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-slate-200 tracking-tight">
+                  <span className="text-lg font-bold text-slate-800 dark:text-slate-200 tracking-tight">
                     {classicalRaw.toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1163,14 +1163,14 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 3. Magnitude Agreement Factor */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[10px] font-sans">Magnitude Agreement</span>
-                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-teal-500/15 text-teal-300 border border-teal-500/25">
+                    <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Magnitude Agreement</span>
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-teal-500/15 text-teal-700 dark:text-teal-300 border border-teal-500/25">
                       Scale
                     </span>
                   </div>
-                  <span className="text-lg font-bold text-teal-300 tracking-tight">
+                  <span className="text-lg font-bold text-teal-600 dark:text-teal-300 tracking-tight">
                     {magnitudeAgreement.toFixed(1)}%
                   </span>
                   <span className="text-[10px] text-slate-500">
@@ -1179,11 +1179,11 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
 
                 {/* 4. Minutiae Invariants Summary */}
-                <div className="p-3 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-1">
-                  <span className="text-slate-400 text-[10px] font-sans">Minutiae Summary</span>
-                  <div className="text-[11px] leading-tight text-slate-300">
+                <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-1">
+                  <span className="text-slate-500 dark:text-slate-400 text-[10px] font-sans">Minutiae Summary</span>
+                  <div className="text-[11px] leading-tight text-slate-700 dark:text-slate-300">
                     <div>Loops: A {matchResult.paramsA?.cycles ?? 0} &bull; B {matchResult.paramsB?.cycles ?? 0}</div>
-                    <div className="text-slate-400">Juncs: A {matchResult.paramsA?.junctions ?? 0} &bull; B {matchResult.paramsB?.junctions ?? 0}</div>
+                    <div className="text-slate-500 dark:text-slate-400">Juncs: A {matchResult.paramsA?.junctions ?? 0} &bull; B {matchResult.paramsB?.junctions ?? 0}</div>
                   </div>
                   <span className="text-[10px] text-slate-500">
                     Ends: A {matchResult.paramsA?.endpoints ?? 0} &bull; B {matchResult.paramsB?.endpoints ?? 0}
@@ -1191,9 +1191,9 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                 </div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-slate-950/40 border border-white/[0.04] flex items-center justify-between text-[11px] font-mono text-slate-400">
+              <div className="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-950/40 border border-black/[0.04] dark:border-white/[0.04] flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-slate-400">
                 <span className="text-slate-500 font-sans">Baseline Verdict:</span>
-                <span className="font-semibold text-slate-200">{matchResult.verdict || 'N/A'}</span>
+                <span className="font-semibold text-slate-800 dark:text-slate-200">{matchResult.verdict || 'N/A'}</span>
               </div>
             </div>
           </div>
@@ -1202,49 +1202,49 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           {/* DUAL-METHOD VERIFICATION & CONFIRMATION (Mask_RCNN ORB)    */}
           {/* ========================================================= */}
           {matchResult.secondary_verification && matchResult.secondary_verification.triggered && (
-            <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
-              <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] flex-wrap gap-2">
+            <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 p-5 rounded-3xl flex flex-col gap-4">
+              <div className="flex items-center justify-between pb-3 border-b border-black/[0.06] dark:border-white/[0.06] flex-wrap gap-2">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-400 border border-amber-500/30">
+                  <div className="w-8 h-8 rounded-xl bg-blue-500/15 flex items-center justify-center text-blue-600 dark:text-blue-400 border border-blue-500/30">
                     <ShieldCheck className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-semibold text-white tracking-tight flex items-center gap-2">
+                    <h4 className="text-xs font-semibold text-slate-900 dark:text-white tracking-tight flex items-center gap-2">
                       Dual-Method Verification &amp; Confirmation Engine
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 font-semibold">
                         {matchResult.secondary_verification.trigger_reason === 'CONFIRMED_MATCH_VERIFICATION'
                           ? 'Triggered: Match Confirmation Check'
                           : 'Triggered: Inconclusive Tie-Breaker Arbitration'}
                       </span>
                     </h4>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
                       Primary Deep Embedding Cross-Validated by Mask R-CNN &bull; Lanczos-4 Sinc SR &bull; ORB Keypoints &bull; Lowe's Ratio Matcher
                     </span>
                   </div>
                 </div>
-                <div className="text-[10px] font-mono text-slate-400">
-                  Threshold: <code className="text-slate-200 font-bold">&ge; {matchResult.secondary_verification.secondary_model?.threshold || 35} good matches</code>
+                <div className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                  Threshold: <code className="text-slate-800 dark:text-slate-200 font-bold">&ge; {matchResult.secondary_verification.secondary_model?.threshold || 35} good matches</code>
                 </div>
               </div>
 
               {/* Consensus Verdict Banner */}
               <div className={`p-4 rounded-2xl border flex items-center justify-between gap-4 flex-wrap ${
-                matchResult.secondary_verification.consensus_badge === 'emerald'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                matchResult.secondary_verification.consensus_badge === 'emerald' || matchResult.secondary_verification.consensus_badge === 'blue'
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-700 dark:text-blue-300'
                   : matchResult.secondary_verification.consensus_badge === 'teal'
-                  ? 'bg-teal-500/10 border-teal-500/30 text-teal-300'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-700 dark:text-cyan-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-700 dark:text-rose-300'
               }`}>
                 <div className="flex items-center gap-3">
-                  {matchResult.secondary_verification.consensus_badge === 'emerald' ? (
-                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  {(matchResult.secondary_verification.consensus_badge === 'emerald' || matchResult.secondary_verification.consensus_badge === 'blue') ? (
+                    <CheckCircle2 className="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
                   ) : matchResult.secondary_verification.consensus_badge === 'teal' ? (
-                    <AlertCircle className="w-5 h-5 text-teal-400 shrink-0" />
+                    <AlertCircle className="w-5 h-5 text-cyan-600 dark:text-cyan-400 shrink-0" />
                   ) : (
-                    <XCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                    <XCircle className="w-5 h-5 text-rose-600 dark:text-rose-400 shrink-0" />
                   )}
                   <div>
-                    <div className="text-xs font-bold text-white uppercase tracking-wider">Dual-Method Consensus:</div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider">Dual-Method Consensus:</div>
                     <div className="text-sm font-semibold">{matchResult.secondary_verification.consensus_verdict}</div>
                   </div>
                 </div>
@@ -1253,52 +1253,52 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               {/* Side-by-Side Model Comparison Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
                 {/* Method 1: Primary Deep Embedding */}
-                <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-2">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-indigo-400 font-bold flex items-center gap-1.5">
+                    <span className="text-indigo-600 dark:text-indigo-400 font-bold flex items-center gap-1.5">
                       <Cpu className="w-3.5 h-3.5" /> Method 1: Deep Embedding Model
                     </span>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                       matchResult.secondary_verification.primary_model?.is_match
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/30'
+                        : 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30'
                     }`}>
                       {matchResult.secondary_verification.primary_model?.is_match ? 'MATCH' : 'NOT CONFIRMED'}
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     Architecture: <strong>ConvNeXt-Tiny + SpatialPyramidGeM (ArcFace 512-D)</strong>
                   </div>
-                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-white/[0.05]">
-                    <span className="text-slate-400">Embedding Similarity:</span>
-                    <span className="text-lg font-bold font-mono text-white">
+                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-black/[0.05] dark:border-white/[0.05]">
+                    <span className="text-slate-500 dark:text-slate-400">Embedding Similarity:</span>
+                    <span className="text-lg font-bold font-mono text-slate-900 dark:text-white">
                       {matchResult.secondary_verification.primary_model?.similarity_pct?.toFixed(1)}%
                     </span>
                   </div>
                 </div>
 
                 {/* Method 2: Mask R-CNN + ORB Statusprint Method */}
-                <div className="p-4 rounded-2xl bg-slate-950/60 border border-white/[0.05] flex flex-col justify-between gap-2">
+                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-950/60 border border-black/[0.05] dark:border-white/[0.05] flex flex-col justify-between gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                    <span className="text-blue-600 dark:text-blue-400 font-bold flex items-center gap-1.5">
                       <ScanLine className="w-3.5 h-3.5" /> Method 2: Mask R-CNN + ORB Matcher
                     </span>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold ${
                       matchResult.secondary_verification.secondary_model?.is_match
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        ? 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/30'
+                        : 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/30'
                     }`}>
                       {matchResult.secondary_verification.secondary_model?.is_match ? 'MATCH' : 'DIFFERENT'}
                     </span>
                   </div>
-                  <div className="text-[11px] text-slate-400">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
                     Method: <strong>Lanczos-4 Sinc SR &bull; CLAHE &bull; ORB 1000 &bull; Lowe's Ratio (statusprint.py)</strong>
                   </div>
-                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-white/[0.05]">
-                    <span className="text-slate-400">Good Matches (d1 &lt; 0.7&middot;d2):</span>
-                    <span className="text-lg font-bold font-mono text-white">
+                  <div className="flex items-baseline justify-between mt-1 pt-2 border-t border-black/[0.05] dark:border-white/[0.05]">
+                    <span className="text-slate-500 dark:text-slate-400">Good Matches (d1 &lt; 0.7&middot;d2):</span>
+                    <span className="text-lg font-bold font-mono text-slate-900 dark:text-white">
                       {matchResult.secondary_verification.secondary_model?.good_matches}
-                      <span className="text-xs text-slate-400 font-normal"> / {matchResult.secondary_verification.secondary_model?.threshold || 35}</span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 font-normal"> / {matchResult.secondary_verification.secondary_model?.threshold || 35}</span>
                     </span>
                   </div>
                 </div>
@@ -1306,22 +1306,22 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
 
               {/* Visual Match Diagram Preview if Available */}
               {matchResult.secondary_verification.secondary_model?.visual_url && (
-                <div className="mt-2 pt-3 border-t border-white/[0.06] flex flex-col gap-2">
+                <div className="mt-2 pt-3 border-t border-black/[0.06] dark:border-white/[0.06] flex flex-col gap-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
                       ORB Keypoint Visual Match Diagram:
                     </span>
                     <a
                       href={matchResult.secondary_verification.secondary_model.visual_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 underline font-mono flex items-center gap-1"
+                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 underline font-mono flex items-center gap-1"
                     >
                       Open Full Size &rarr;
                     </a>
                   </div>
-                  <div className="rounded-2xl overflow-hidden border border-white/[0.1] bg-black/60 max-h-72 flex items-center justify-center">
+                  <div className="rounded-2xl overflow-hidden border border-black/[0.08] dark:border-white/[0.1] bg-slate-100 dark:bg-black/60 max-h-72 flex items-center justify-center">
                     <img
                       src={matchResult.secondary_verification.secondary_model.visual_url}
                       alt="ORB Keypoint Match Diagram"
@@ -1337,18 +1337,18 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
           {/* 5. COLLAPSIBLE FRAME DETAILS ACCORDION                     */}
           {/* ========================================================= */}
           {dataA && dataB && (
-            <div className="backdrop-blur-2xl bg-slate-900/50 border border-white/[0.08] shadow-2xl shadow-black/40 rounded-3xl overflow-hidden transition-all">
+            <div className="backdrop-blur-2xl bg-white/75 dark:bg-slate-900/50 border border-black/[0.06] dark:border-white/[0.08] shadow-[0_4px_24px_rgba(0,0,0,0.03)] dark:shadow-2xl dark:shadow-black/40 rounded-3xl overflow-hidden transition-all">
               <button
                 type="button"
                 onClick={() => setShowFrameDetails(!showFrameDetails)}
-                className="w-full p-4.5 flex items-center justify-between text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/[0.02] transition-colors cursor-pointer"
+                className="w-full p-4.5 flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-2.5">
-                  <ScanLine className="w-4 h-4 text-emerald-400" />
+                  <ScanLine className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <span>Inspect 5 Temporal Muzzle Frames &amp; Skeleton Minutiae</span>
                 </div>
-                <div className="flex items-center gap-2 text-slate-400 text-xs">
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-white/[0.05] border border-white/[0.08]">
+                <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-xs">
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-black/[0.05] dark:bg-white/[0.05] border border-black/[0.08] dark:border-white/[0.08]">
                     {showFrameDetails ? 'Collapse Details' : '5 Frames Extracted'}
                   </span>
                   {showFrameDetails ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -1356,23 +1356,23 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
               </button>
 
               {showFrameDetails && (
-                <div className="p-5 border-t border-white/[0.06] flex flex-col gap-6 bg-slate-950/40">
+                <div className="p-5 border-t border-black/[0.06] dark:border-white/[0.06] flex flex-col gap-6 bg-slate-50/50 dark:bg-slate-950/40">
                   
                   {/* VIDEO A 5 FRAMES */}
                   <div className="flex flex-col gap-2.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-emerald-400 flex items-center gap-1.5">
-                        <span className="w-5 h-5 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center text-[10px] font-mono">A</span>
+                      <span className="font-semibold text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-lg bg-blue-500/20 text-blue-700 dark:text-blue-300 flex items-center justify-center text-[10px] font-mono">A</span>
                         Video A: 5 Temporal Frames (10%, 30%, 50%, 70%, 90%)
                       </span>
 
                       {/* View Stage Selector */}
-                      <div className="flex items-center bg-slate-950/70 p-0.5 rounded-xl border border-white/[0.08] text-[11px]">
+                      <div className="flex items-center bg-slate-100 dark:bg-slate-950/70 p-0.5 rounded-xl border border-black/[0.06] dark:border-white/[0.08] text-[11px]">
                         <button
                           type="button"
                           onClick={() => setViewStageA('skeleton')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageA === 'skeleton' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageA === 'skeleton' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           1-px Ridge Skeleton
@@ -1381,7 +1381,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                           type="button"
                           onClick={() => setViewStageA('crop')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageA === 'crop' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageA === 'crop' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           Native Crop
@@ -1390,7 +1390,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                           type="button"
                           onClick={() => setViewStageA('response')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageA === 'response' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageA === 'response' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           Groove Map
@@ -1403,7 +1403,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                         <div
                           key={i}
                           onClick={() => setPreviewImage({ url: getFrameUrl(f, viewStageA), title: `Video A - Frame #${f.frame_number}` })}
-                          className="flex flex-col rounded-2xl border border-white/[0.08] overflow-hidden bg-slate-950/60 cursor-pointer hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-950/30 transition-all group"
+                          className="flex flex-col rounded-2xl border border-black/[0.08] dark:border-white/[0.08] overflow-hidden bg-white dark:bg-slate-950/60 cursor-pointer hover:border-blue-500/50 hover:shadow-lg hover:shadow-blue-500/10 transition-all group"
                         >
                           <div className="aspect-square relative overflow-hidden bg-black flex items-center justify-center">
                             <img src={getFrameUrl(f, viewStageA)} alt={`Frame ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -1411,7 +1411,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                               #{f.frame_number}
                             </span>
                           </div>
-                          <div className="p-1.5 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60 border-t border-white/[0.04]">
+                          <div className="p-1.5 text-[9px] font-mono text-center text-slate-500 dark:text-slate-400 truncate bg-slate-50 dark:bg-slate-900/60 border-t border-black/[0.04] dark:border-white/[0.04]">
                             {f.parameters?.skeleton_pixels ?? 0} skel px
                           </div>
                         </div>
@@ -1422,18 +1422,18 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   {/* VIDEO B 5 FRAMES */}
                   <div className="flex flex-col gap-2.5">
                     <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-teal-400 flex items-center gap-1.5">
-                        <span className="w-5 h-5 rounded-lg bg-teal-500/20 text-teal-300 flex items-center justify-center text-[10px] font-mono">B</span>
+                      <span className="font-semibold text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                        <span className="w-5 h-5 rounded-lg bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-[10px] font-mono">B</span>
                         Video B: 5 Temporal Frames (10%, 30%, 50%, 70%, 90%)
                       </span>
 
                       {/* View Stage Selector */}
-                      <div className="flex items-center bg-slate-950/70 p-0.5 rounded-xl border border-white/[0.08] text-[11px]">
+                      <div className="flex items-center bg-slate-100 dark:bg-slate-950/70 p-0.5 rounded-xl border border-black/[0.06] dark:border-white/[0.08] text-[11px]">
                         <button
                           type="button"
                           onClick={() => setViewStageB('skeleton')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageB === 'skeleton' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageB === 'skeleton' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           1-px Ridge Skeleton
@@ -1442,7 +1442,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                           type="button"
                           onClick={() => setViewStageB('crop')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageB === 'crop' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageB === 'crop' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           Native Crop
@@ -1451,7 +1451,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                           type="button"
                           onClick={() => setViewStageB('response')}
                           className={`px-2.5 py-1 rounded-lg font-medium transition-all cursor-pointer ${
-                            viewStageB === 'response' ? 'bg-white/10 text-white shadow-xs' : 'text-slate-400 hover:text-slate-200'
+                            viewStageB === 'response' ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                           }`}
                         >
                           Groove Map
@@ -1464,7 +1464,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                         <div
                           key={i}
                           onClick={() => setPreviewImage({ url: getFrameUrl(f, viewStageB), title: `Video B - Frame #${f.frame_number}` })}
-                          className="flex flex-col rounded-2xl border border-white/[0.08] overflow-hidden bg-slate-950/60 cursor-pointer hover:border-teal-500/50 hover:shadow-lg hover:shadow-teal-950/30 transition-all group"
+                          className="flex flex-col rounded-2xl border border-black/[0.08] dark:border-white/[0.08] overflow-hidden bg-white dark:bg-slate-950/60 cursor-pointer hover:border-indigo-500/50 hover:shadow-lg hover:shadow-indigo-500/10 transition-all group"
                         >
                           <div className="aspect-square relative overflow-hidden bg-black flex items-center justify-center">
                             <img src={getFrameUrl(f, viewStageB)} alt={`Frame ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
@@ -1472,7 +1472,7 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                               #{f.frame_number}
                             </span>
                           </div>
-                          <div className="p-1.5 text-[9px] font-mono text-center text-slate-400 truncate bg-slate-900/60 border-t border-white/[0.04]">
+                          <div className="p-1.5 text-[9px] font-mono text-center text-slate-500 dark:text-slate-400 truncate bg-slate-50 dark:bg-slate-900/60 border-t border-black/[0.04] dark:border-white/[0.04]">
                             {f.parameters?.skeleton_pixels ?? 0} skel px
                           </div>
                         </div>
@@ -1481,33 +1481,33 @@ export default function TwoVideoCosineMatcher({ sampleVideos = [] }) {
                   </div>
 
                   {/* 10-PARAMETER DELTA TABLE */}
-                  <div className="flex flex-col gap-2 pt-2 border-t border-white/[0.06]">
-                    <span className="text-xs font-semibold text-slate-300">
+                  <div className="flex flex-col gap-2 pt-2 border-t border-black/[0.06] dark:border-white/[0.06]">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
                       10-Parameter Ridge Minutiae Delta Comparison:
                     </span>
-                    <div className="overflow-x-auto rounded-2xl border border-white/[0.08] shadow-inner">
+                    <div className="overflow-x-auto rounded-2xl border border-black/[0.08] dark:border-white/[0.08] shadow-inner">
                       <table className="w-full text-xs font-mono text-left">
-                        <thead className="bg-slate-900/80 text-slate-400 text-[10px] border-b border-white/[0.06]">
+                        <thead className="bg-slate-100 dark:bg-slate-900/80 text-slate-500 dark:text-slate-400 text-[10px] border-b border-black/[0.06] dark:border-white/[0.06]">
                           <tr>
                             <th className="py-2.5 px-3.5">Minutiae Parameter</th>
-                            <th className="py-2.5 px-3.5 text-emerald-400">Video A (Median)</th>
-                            <th className="py-2.5 px-3.5 text-teal-400">Video B (Median)</th>
+                            <th className="py-2.5 px-3.5 text-blue-600 dark:text-blue-400">Video A (Median)</th>
+                            <th className="py-2.5 px-3.5 text-indigo-600 dark:text-indigo-400">Video B (Median)</th>
                             <th className="py-2.5 px-3.5 text-right">Delta (&Delta;%)</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-white/[0.04] bg-slate-950/40">
+                        <tbody className="divide-y divide-black/[0.04] dark:divide-white/[0.04] bg-white dark:bg-slate-950/40">
                           {Object.keys(FEATURE_LABELS).map((key) => {
                             const valA = dataA.median_parameters?.[key] ?? 0;
                             const valB = dataB.median_parameters?.[key] ?? 0;
                             const unit = FEATURE_UNITS[key] || '';
                             const delta = valA !== 0 ? Math.abs((valB - valA) / valA) * 100 : 0;
                             return (
-                              <tr key={key} className="hover:bg-white/[0.02] transition-colors">
-                                <td className="py-2 px-3.5 text-slate-300 font-sans font-medium">{FEATURE_LABELS[key]}</td>
-                                <td className="py-2 px-3.5 text-emerald-300 font-medium">{valA} {unit}</td>
-                                <td className="py-2 px-3.5 text-teal-300 font-medium">{valB} {unit}</td>
+                              <tr key={key} className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors">
+                                <td className="py-2 px-3.5 text-slate-700 dark:text-slate-300 font-sans font-medium">{FEATURE_LABELS[key]}</td>
+                                <td className="py-2 px-3.5 text-blue-700 dark:text-blue-300 font-medium">{valA} {unit}</td>
+                                <td className="py-2 px-3.5 text-indigo-700 dark:text-indigo-300 font-medium">{valB} {unit}</td>
                                 <td className={`py-2 px-3.5 text-right font-semibold ${
-                                  delta <= 15 ? 'text-emerald-400' : delta <= 35 ? 'text-amber-400' : 'text-slate-400'
+                                  delta <= 15 ? 'text-blue-600 dark:text-blue-400' : delta <= 35 ? 'text-amber-600 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'
                                 }`}>
                                   {delta.toFixed(1)}%
                                 </td>
