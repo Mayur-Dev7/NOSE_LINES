@@ -190,7 +190,7 @@ export default function BiometricProcessTimeline({
             isCompleted
               ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30 shadow-[0_0_15px_rgba(59,130,246,0.2)]'
               : isProcessing
-              ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 border border-cyan-500/30 animate-pulse'
+              ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/30 animate-pulse'
               : 'bg-black/[0.05] dark:bg-white/[0.05] text-slate-500 dark:text-slate-400 border border-black/[0.06] dark:border-white/[0.08]'
           }`}>
             <Activity className="w-4 h-4" />
@@ -204,7 +204,7 @@ export default function BiometricProcessTimeline({
                 isCompleted
                   ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30'
                   : isProcessing
-                  ? 'bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30 animate-pulse'
+                  ? 'bg-blue-500/15 text-blue-700 dark:text-blue-300 border-blue-500/30 animate-pulse'
                   : 'bg-black/[0.05] dark:bg-white/[0.05] text-slate-500 dark:text-slate-400 border-black/[0.06] dark:border-white/[0.08]'
               }`}>
                 {isCompleted ? 'Pipeline Complete' : isProcessing ? `Executing Step ${activeStep}/7...` : '7 Stages Ready'}
@@ -235,8 +235,8 @@ export default function BiometricProcessTimeline({
               onClick={() => setTimingViewMode('videoA')}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
                 timingViewMode === 'videoA'
-                  ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               Video A
@@ -246,8 +246,8 @@ export default function BiometricProcessTimeline({
               onClick={() => setTimingViewMode('videoB')}
               className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all cursor-pointer ${
                 timingViewMode === 'videoB'
-                  ? 'bg-white/10 text-white shadow-xs border border-white/10'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-white dark:bg-white/10 text-slate-900 dark:text-white shadow-xs border border-black/[0.06] dark:border-white/10'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               Video B
@@ -258,20 +258,20 @@ export default function BiometricProcessTimeline({
         {/* Latency / Elapsed Time Indicators */}
         <div className="flex items-center gap-2 flex-wrap">
           {isProcessing && stopwatchSec > 0 && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/30 text-xs font-mono shadow-inner animate-pulse">
-              <Clock className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-slate-400 font-sans text-[11px]">Elapsed:</span>
-              <strong className="text-cyan-300 font-bold">{stopwatchSec}s</strong>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-blue-500/30 text-xs font-mono shadow-inner animate-pulse">
+              <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span className="text-slate-500 dark:text-slate-400 font-sans text-[11px]">Elapsed:</span>
+              <strong className="text-blue-700 dark:text-blue-300 font-bold">{stopwatchSec}s</strong>
             </div>
           )}
 
           {isCompleted && (
             <>
               {realWallClockSec > 0 && (
-                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-black/[0.06] dark:border-cyan-500/30 text-xs font-mono shadow-inner">
-                  <Clock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-black/[0.06] dark:border-indigo-500/30 text-xs font-mono shadow-inner">
+                  <Clock className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                   <span className="text-slate-500 dark:text-slate-400 font-sans text-[11px]">Wall-Clock Time:</span>
-                  <strong className="text-cyan-700 dark:text-cyan-300 font-bold">{realWallClockSec}s</strong>
+                  <strong className="text-indigo-700 dark:text-indigo-300 font-bold">{realWallClockSec}s</strong>
                 </div>
               )}
               <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-950/80 border border-black/[0.06] dark:border-blue-500/30 text-xs font-mono shadow-inner">
@@ -301,7 +301,7 @@ export default function BiometricProcessTimeline({
               key={s.step}
               className={`rounded-2xl border transition-all duration-300 overflow-hidden ${
                 isStepActive
-                  ? 'bg-blue-500/10 dark:bg-gradient-to-r dark:from-cyan-950/40 dark:via-slate-900/60 dark:to-slate-950/80 border-blue-500/40 dark:border-cyan-500/50 shadow-lg shadow-blue-500/10 dark:shadow-cyan-950/30 ring-1 ring-blue-500/30 dark:ring-cyan-500/30'
+                  ? 'bg-blue-500/10 dark:bg-gradient-to-r dark:from-blue-950/40 dark:via-slate-900/60 dark:to-slate-950/80 border-blue-500/40 dark:border-blue-500/50 shadow-lg shadow-blue-500/10 dark:shadow-blue-950/30 ring-1 ring-blue-500/30 dark:ring-blue-500/30'
                   : isStepDone
                   ? 'bg-white/60 dark:bg-slate-950/40 border-black/[0.06] dark:border-white/[0.06] hover:border-black/[0.12] dark:hover:border-white/[0.12]'
                   : 'bg-black/[0.02] dark:bg-slate-950/20 border-black/[0.04] dark:border-white/[0.03] opacity-65'
@@ -318,13 +318,13 @@ export default function BiometricProcessTimeline({
                     isStepDone
                       ? 'bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/40 shadow-xs'
                       : isStepActive
-                      ? 'bg-cyan-500/20 text-cyan-600 dark:text-cyan-300 border border-cyan-500/50 shadow-[0_0_12px_rgba(6,182,212,0.4)] animate-pulse ring-2 ring-cyan-500/30'
-                      : 'bg-black/[0.04] dark:bg-white/[0.04] text-slate-400 dark:text-slate-500 border border-black/[0.06] dark:border-white/[0.06]'
+                      ? 'bg-blue-500/20 text-blue-600 dark:text-blue-300 border border-blue-500/50 shadow-[0_0_12px_rgba(0,113,227,0.4)] animate-pulse ring-2 ring-blue-500/30'
+                      : 'bg-black/[0.04] dark:bg-white/[0.04] text-slate-500 dark:text-slate-400 border border-black/[0.06] dark:border-white/[0.06]'
                   }`}>
                     {isStepDone ? (
                       <Check className="w-4 h-4 stroke-[3]" />
                     ) : isStepActive ? (
-                      <span className="w-2.5 h-2.5 rounded-full bg-cyan-500 dark:bg-cyan-400 animate-ping" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-blue-500 dark:bg-blue-400 animate-ping" />
                     ) : (
                       <span>{s.step}</span>
                     )}
@@ -336,7 +336,7 @@ export default function BiometricProcessTimeline({
                         Step {s.step}: {s.title}
                       </span>
                       {isStepActive && (
-                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.2 rounded-full bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 animate-pulse">
+                        <span className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.2 rounded-full bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-blue-500/30 animate-pulse">
                           Processing
                         </span>
                       )}
@@ -357,7 +357,7 @@ export default function BiometricProcessTimeline({
                   )}
 
                   {isStepActive && (
-                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-700 dark:text-cyan-300 font-mono text-[11px] animate-pulse">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-500/10 border border-blue-500/30 text-blue-700 dark:text-blue-300 font-mono text-[11px] animate-pulse">
                       <Clock className="w-3 h-3 animate-spin" />
                       <span>Computing...</span>
                     </div>
@@ -390,7 +390,7 @@ export default function BiometricProcessTimeline({
 
                     {/* Mathematical Formulation Card */}
                     <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-black/[0.06] dark:border-white/[0.06] flex flex-col gap-1.5">
-                      <div className="flex items-center gap-1.5 text-cyan-600 dark:text-cyan-400 font-semibold text-[11px] tracking-wide uppercase">
+                      <div className="flex items-center gap-1.5 text-indigo-600 dark:text-indigo-400 font-semibold text-[11px] tracking-wide uppercase">
                         <Info className="w-3.5 h-3.5" />
                         <span>Mathematical Principle &amp; Algorithms</span>
                       </div>

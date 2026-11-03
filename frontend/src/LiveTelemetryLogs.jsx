@@ -155,7 +155,7 @@ export default function LiveTelemetryLogs({
             type="button"
             onClick={handleClearLogs}
             disabled={logs.length === 0}
-            className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 transition-all border border-white/[0.04] disabled:opacity-30 disabled:cursor-not-allowed"
+            className="p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all border border-black/[0.04] dark:border-white/[0.04] disabled:opacity-30 disabled:cursor-not-allowed"
             title="Clear logs"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -165,7 +165,7 @@ export default function LiveTelemetryLogs({
           <button
             type="button"
             onClick={() => setIsExpanded(!isExpanded)}
-            className="p-1.5 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-slate-400 hover:text-slate-200 transition-all border border-white/[0.04]"
+            className="p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.04] hover:bg-black/[0.08] dark:hover:bg-white/[0.08] text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all border border-black/[0.04] dark:border-white/[0.04]"
             title={isExpanded ? 'Collapse log viewer' : 'Expand log viewer'}
           >
             {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -177,26 +177,26 @@ export default function LiveTelemetryLogs({
       {isExpanded && (
         <div
           ref={scrollRef}
-          className="p-4 font-mono text-xs overflow-y-auto max-h-64 min-h-[140px] flex flex-col gap-1.5 bg-slate-950/90 selection:bg-cyan-500/30 selection:text-cyan-200"
+          className="p-4 font-mono text-xs overflow-y-auto max-h-64 min-h-[140px] flex flex-col gap-1.5 bg-slate-950/90 selection:bg-blue-600 selection:text-white"
         >
           {logs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-slate-500 text-center gap-1.5 select-none">
-              <Activity className="w-6 h-6 stroke-[1.5] text-slate-600 animate-pulse" />
+            <div className="flex flex-col items-center justify-center py-8 text-slate-400 text-center gap-1.5 select-none">
+              <Activity className="w-6 h-6 stroke-[1.5] text-slate-500 dark:text-slate-400 animate-pulse" />
               <span>No active telemetry logs captured yet.</span>
-              <span className="text-[10px] text-slate-600">
+              <span className="text-[10px] text-slate-500 dark:text-slate-400">
                 Click &ldquo;Compare 2 Videos&rdquo; or start an extraction to stream live hardware telemetry.
               </span>
             </div>
           ) : (
             logs.map((log, idx) => (
               <div key={idx} className="flex items-start gap-2.5 leading-relaxed font-mono hover:bg-white/[0.02] py-0.5 px-1 rounded transition-colors">
-                <span className="text-[10px] text-slate-500 select-none shrink-0 pt-0.5">
+                <span className="text-[10px] text-slate-400 select-none shrink-0 pt-0.5">
                   {log.timestamp || '00:00:00'}
                 </span>
                 <span className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded border shrink-0 ${getBadgeColor(log.level, log.message)}`}>
                   {log.level || 'INFO'}
                 </span>
-                <span className="text-slate-300 break-all text-[11px] font-mono">
+                <span className="text-slate-200 break-all text-[11px] font-mono">
                   {log.message}
                 </span>
               </div>

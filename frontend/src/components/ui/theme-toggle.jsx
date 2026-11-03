@@ -25,10 +25,10 @@ export function ThemeToggle({ className }) {
           "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer select-none",
           !isDark
             ? "bg-white text-slate-900 shadow-sm border border-black/[0.06] font-semibold"
-            : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+            : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
         )}
       >
-        <Sun className={cn("w-3.5 h-3.5", !isDark ? "text-amber-500" : "text-slate-400")} />
+        <Sun className={cn("w-3.5 h-3.5", !isDark ? "text-amber-500" : "text-slate-400 dark:text-slate-400")} />
         <span>Light</span>
       </button>
       <button
@@ -38,10 +38,10 @@ export function ThemeToggle({ className }) {
           "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-all cursor-pointer select-none",
           isDark
             ? "bg-slate-800 text-white shadow-sm border border-white/10 font-semibold"
-            : "text-slate-500 hover:text-slate-900 dark:hover:text-slate-200"
+            : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
         )}
       >
-        <Moon className={cn("w-3.5 h-3.5", isDark ? "text-blue-400" : "text-slate-400")} />
+        <Moon className={cn("w-3.5 h-3.5", isDark ? "text-blue-400" : "text-slate-400 dark:text-slate-400")} />
         <span>Dark</span>
       </button>
     </div>

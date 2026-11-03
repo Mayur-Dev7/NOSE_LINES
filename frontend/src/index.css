@@ -23,6 +23,23 @@ html.dark, html.dark body {
   color: #f1f5f9 !important;
 }
 
+/* Native select & option contrast enforcement in dark and light modes */
+html.dark select,
+html.dark option,
+html.dark input,
+html.dark textarea {
+  background-color: #0f172a;
+  color: #f1f5f9;
+}
+
+html.light select,
+html.light option,
+html.light input,
+html.light textarea {
+  background-color: #ffffff;
+  color: #1e293b;
+}
+
 body {
   margin: 0;
   padding: 0;
